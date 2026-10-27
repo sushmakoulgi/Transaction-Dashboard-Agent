@@ -59,9 +59,8 @@ Transaction_Dashboard/
 │   │   │   ├── filter_validator.py   # FilterValidator → ValidatedSearch or all issues
 │   │   │   └── filter_compiler.py    # FilterCompiler: ResolvedNode → ColumnElement[bool]
 │   │   ├── repositories/
-│   │   │   ├── searchable_repository.py   # generic paginated search
-│   │   │   ├── transaction_repository.py
-│   │   │   └── chargeback_repository.py
+│   │   │   ├── searchable_repository.py   # generic count + page, stable sort, year scope
+│   │   │   └── search_definitions.py      # transaction + chargeback result columns ← add columns here
 │   │   ├── services/
 │   │   │   ├── search_service.py     # validate → compile → query
 │   │   │   └── transaction_detail_service.py
@@ -401,24 +400,29 @@ Example: `transaction_date gt "2026-10-15"` becomes `≥ 2026-10-16 00:00` New Y
   2. `session()` opens every session with `SET TRANSACTION READ ONLY` and always rolls back at the end. Writes fail even if the service were given the owner account.
 - Verified against Postgres: the owner account fails the startup check, and an INSERT through a session that uses it is rejected with "read-only transaction".
 
-### 3.5 Generic search (`searchable_repository.py`, `search_service.py`)
-```python
-class SearchableRepository(Generic[RowT]):
-    def __init__(self, root_entity, base_query_factory, row_mapper, registry, compiler): ...
-    async def search(self, session, request: SearchRequest) -> PaginatedResult[RowT]:
-        # base select → apply joins → where → count(*) over same where → order/limit/offset
-```
-- `SearchService.search(entity, request)` runs: validator, then raise `FilterValidationFailed(issues)` (HTTP 422), then repository.
-- Default sort: `transaction_date desc` / `opened_at desc`, then the primary key to break ties, so page order is stable.
+### 3.5 Generic search (`repositories/searchable_repository.py`, `repositories/search_definitions.py`)
+One generic repository serves every entity. Each entity is described by data, not by a subclass:
 
 ```python
-class PaginatedResult(BaseModel, Generic[T]):
-    items: list[T]
-    page: int
-    page_size: int
-    total_count: int
-    total_pages: int
+@dataclass(frozen=True, eq=False)
+class SearchQueryDefinition[ItemT: BaseModel]:
+    registry: FieldRegistry                             # filterable fields + root entity
+    item_model: type[ItemT]                             # TransactionSummary / ChargebackSummary
+    result_columns: Mapping[str, SQLColumnExpression]   # one per model field (checked at import)
+    display_relations: tuple[Relation, ...] = ()        # 1:1 relations the columns read from
+
+class SearchableRepository[ItemT]:
+    async def search(self, session, search: ValidatedSearch, scope: DateRange) -> PaginatedResult[ItemT]
 ```
+- **Two queries in the same read-only transaction, with the same WHERE clause** (`scope AND compiled filter`):
+  - **Count:** `select(count(*))`, joining only what the filter needs.
+  - **Page:** the labelled result columns, joining display relations, filter relations and the sort field's relation, each once (`unique_in_order`).
+- **Order:** the sort field (empty values last), then the primary key ascending. Pages never overlap or skip rows. Verified: 4 pages of 30 give 100 distinct transactions in date order.
+- **Scope:** the caller passes the current-year `DateRange`, which is applied to `registry.current_year_scope_field` in both queries. `SearchService` (P1a-9) supplies it.
+- **Result rows** (`shared/contracts/search_results.py`):
+  - `TransactionSummary` adds payment columns, `card_brand` (None for ACH), `has_refund` (EXISTS), `has_chargeback` and `chargeback_status`.
+  - `ChargebackSummary` adds the transaction's `currency` and `transaction_date`, the `network`, and `latest_event_type` (a correlated subquery on the highest `event_sequence`).
+- **Adding a searchable entity:** a field registry plus one `SearchQueryDefinition`. Adding a result column: one entry in `result_columns` plus the model field.
 
 ## 4. Transaction Service API (`:8200`, prefix `/api/v1`, bearer auth)
 
@@ -712,7 +716,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1a-5 | `FilterValidator` (tree walk against the registry, all issue codes) → resolved tree | M | P1a-3 | Every issue code covered. All issues returned in one pass, with the right path ✅ |
 | P1a-6 | `FilterCompiler` (operator map, AND/OR/NOT, 1:1 joins, 1:n EXISTS) | L | P1a-3, P1a-4 | SQL snapshot tests. No string interpolation of values. OR + NOT + nested compile correctly ✅ |
 | P1a-7 | Read-only async DB session factory | S | P0-5 | Sessions use `app_readonly`. An attempted write raises ✅ |
-| P1a-8 | `SearchableRepository` + transaction/chargeback repositories (count + page, stable sort) | M | P1a-6, P1a-7 | Correct `total_count` with 1:n filters (no duplicates) |
+| P1a-8 | `SearchableRepository` + transaction/chargeback repositories (count + page, stable sort) | M | P1a-6, P1a-7 | Correct `total_count` with 1:n filters (no duplicates) ✅ |
 | P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate), both limited to the current year | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence. A search without a date filter and a detail lookup never return rows outside the current year |
 | P1a-10 | Routes, 422/404 error mapping, bearer auth, `/health` | M | P1a-9 | OpenAPI docs render. Validation errors return the issue list |
 | P1a-11 | Integration tests for UC1–UC5 + OR/NOT cases | M | P1a-10, P0-6 | All pass against seeded Postgres |

@@ -60,9 +60,9 @@ class CompiledFilter:
     required_relations: tuple[Relation, ...]  # one-to-one relations to LEFT JOIN, in order
 
 
-def join_required_relations[RowT: tuple[Any, ...]](
-    statement: Select[RowT], relations: tuple[Relation, ...]
-) -> Select[RowT]:
+def join_required_relations[StatementT: Select[Any]](
+    statement: StatementT, relations: tuple[Relation, ...]
+) -> StatementT:
     for relation in relations:
         statement = statement.outerjoin(relation.target, relation.join_condition)
     return statement

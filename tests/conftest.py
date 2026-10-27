@@ -1,10 +1,11 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
-from sqlalchemy import Connection, create_engine
+from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.exc import OperationalError
 
 from shared.config import DatabaseSettings
+from transaction_service.persistence.database import ReadOnlyDatabase
 
 
 @pytest.fixture
@@ -18,3 +19,22 @@ def readonly_connection() -> Iterator[Connection]:
     with connection:
         yield connection
     engine.dispose()
+
+
+async def connect_or_skip(database_url: str) -> ReadOnlyDatabase:
+    database = ReadOnlyDatabase(database_url)
+    try:
+        async with database.session() as session:
+            await session.execute(text("SELECT 1"))
+    except OperationalError as error:
+        await database.dispose()
+        pytest.skip(f"Postgres is not reachable: {error.orig}")
+    return database
+
+
+@pytest.fixture
+async def readonly_database() -> AsyncIterator[ReadOnlyDatabase]:
+    """The service's ReadOnlyDatabase as app_readonly; skips when Postgres isn't running."""
+    database = await connect_or_skip(str(DatabaseSettings().postgres_dsn_readonly))
+    yield database
+    await database.dispose()

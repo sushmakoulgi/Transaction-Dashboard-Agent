@@ -6,8 +6,9 @@ Requires the seeded docker-compose Postgres (`make up migrate seed`).
 from collections.abc import AsyncIterator
 
 import pytest
+from conftest import connect_or_skip
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import DBAPIError
 
 from shared.config import DatabaseSettings
 from transaction_service.persistence.database import (
@@ -21,24 +22,6 @@ INSERT_TRANSACTION = text(
     "INSERT INTO transactions (transaction_id, customer_id, amount, currency, transaction_type,"
     " transaction_date) VALUES (gen_random_uuid(), 'C-1', 1, 'USD', 'PURCHASE', now())"
 )
-
-
-async def connect_or_skip(database_url: str) -> ReadOnlyDatabase:
-    database = ReadOnlyDatabase(database_url)
-    try:
-        async with database.session() as session:
-            await session.execute(text("SELECT 1"))
-    except OperationalError as error:
-        await database.dispose()
-        pytest.skip(f"Postgres is not reachable: {error.orig}")
-    return database
-
-
-@pytest.fixture
-async def readonly_database() -> AsyncIterator[ReadOnlyDatabase]:
-    database = await connect_or_skip(str(DatabaseSettings().postgres_dsn_readonly))
-    yield database
-    await database.dispose()
 
 
 @pytest.fixture
