@@ -30,24 +30,24 @@ Transaction_Dashboard/
 │       ├── config/settings.py        # BaseServiceSettings, DatabaseSettings (pydantic-settings)
 │       ├── clock.py                  # Clock protocol, SystemClock, FixedClock
 │       ├── logging/setup.py
-│       ├── http/bearer_auth.py       # FastAPI dependency: verify_bearer_token
+│       ├── http/bearer_auth.py       # require_bearer_token(): constant-time static bearer token
 │       └── contracts/                # Pydantic DTOs shared across services
 │           ├── filter_expression.py  # FilterCondition, FilterGroup, FilterNode
 │           ├── search_request.py     # SearchRequest, SortSpec
 │           ├── paginated_result.py   # PaginatedResult[T]
 │           ├── query_plan.py         # QueryPlan, QueryPlanStep (added in Phase 1c)
 │           ├── filter_validation_issue.py  # FilterValidationIssue, FilterIssueCode
+│           ├── api_responses.py      # ErrorResponse, FilterValidationResult, HealthStatus
 │           ├── search_results.py     # TransactionSummary, ChargebackSummary
 │           └── transaction_detail.py # TransactionDetail + payment / refund / chargeback / event
 ├── services/
 │   ├── transaction_service/src/transaction_service/
-│   │   ├── main.py                   # app factory
+│   │   ├── main.py                   # create_app(): startup write check, wiring, auth, /health
 │   │   ├── settings.py               # TransactionServiceSettings (read-only DSN, timezone, pool)
 │   │   ├── api/
-│   │   │   ├── dependencies.py       # session + service wiring
-│   │   │   ├── transaction_routes.py
-│   │   │   ├── chargeback_routes.py
-│   │   │   └── metadata_routes.py    # fields + validate
+│   │   │   ├── dependencies.py       # ServiceContainer (built at startup) + route dependencies
+│   │   │   ├── routes.py             # search, detail, filterable-fields, filters/validate
+│   │   │   └── error_handlers.py     # every error → ErrorResponse {error, message, issues[]}
 │   │   ├── persistence/
 │   │   │   └── database.py           # ReadOnlyDatabase: async engine, read-only sessions, startup write check
 │   │   ├── filtering/
@@ -445,11 +445,21 @@ class SearchableRepository[ItemT]:
 | POST | `/chargebacks/search` | `SearchRequest` | `PaginatedResult[ChargebackSummary]` |
 | GET | `/transactions/{transaction_id}` | — | `TransactionDetail` (payment, refunds[], chargeback + events[]) |
 | GET | `/{entity}/filterable-fields` | `entity ∈ {transactions, chargebacks}` | `list[FilterableFieldDescription]` |
-| POST | `/{entity}/filters/validate` | `SearchRequest` | `{is_valid, issues[]}` |
-| GET | `/health` | — | `{status}` |
+| POST | `/{entity}/filters/validate` | `SearchRequest` | `FilterValidationResult{is_valid, issues[]}` (200 even when invalid) |
+| GET | `/health` | — (no token) | `{status: ok}`, or 503 `{status: unavailable}` when the database is unreachable |
 
-- Search uses `POST` only so the filter tree can be sent as a body. No endpoint changes data.
-- Errors are 422 `{"error": "FILTER_VALIDATION_FAILED", "issues": [...]}`, or 404 for an unknown ID.
+- **Run:** `make run-transaction-service`, i.e. `uvicorn transaction_service.main:create_app --factory --port 8200`.
+- **Startup:** the lifespan builds `ReadOnlyDatabase`, runs `ensure_cannot_write()` (refusing to start with a writable account), then wires the services into a `ServiceContainer` on `app.state`.
+- **Read-only surface:** only GET and POST exist, and POST only on the two searches and validate. A test reads `/openapi.json` to check this, and DELETE returns 405.
+- **Auth:** every `/api/v1` route requires `Authorization: Bearer $TRANSACTION_SERVICE_API_TOKEN` (at least 16 characters, compared in constant time). Failures return 401 with `WWW-Authenticate: Bearer`.
+- **Errors all use `ErrorResponse {error, message, issues[]}`:**
+
+| Status | `error` | When |
+|---|---|---|
+| 422 | `FILTER_VALIDATION_FAILED` | The validator found problems. `issues` lists all of them with paths and suggestions |
+| 422 | `INVALID_REQUEST` | The body or path doesn't match the contract: unknown keys, unsafe field names, `page_size` > 100, nesting > 3, a malformed UUID. Each issue has code `INVALID_REQUEST_SHAPE` and a path such as `filter.field` or `path.transaction_id` |
+| 404 | `TRANSACTION_NOT_FOUND` | Unknown ID, or outside the current year |
+| 401 / 405 | `UNAUTHORIZED` / `METHOD_NOT_ALLOWED` | Missing or wrong token / write method |
 
 **Use cases → requests:**
 
@@ -731,7 +741,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1a-7 | Read-only async DB session factory | S | P0-5 | Sessions use `app_readonly`. An attempted write raises ✅ |
 | P1a-8 | `SearchableRepository` + transaction/chargeback repositories (count + page, stable sort) | M | P1a-6, P1a-7 | Correct `total_count` with 1:n filters (no duplicates) ✅ |
 | P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate), both limited to the current year | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence. A search without a date filter and a detail lookup never return rows outside the current year ✅ |
-| P1a-10 | Routes, 422/404 error mapping, bearer auth, `/health` | M | P1a-9 | OpenAPI docs render. Validation errors return the issue list |
+| P1a-10 | Routes, 422/404 error mapping, bearer auth, `/health` | M | P1a-9 | OpenAPI docs render. Validation errors return the issue list ✅ |
 | P1a-11 | Integration tests for UC1–UC5 + OR/NOT cases | M | P1a-10, P0-6 | All pass against seeded Postgres |
 | P1a-12 | Security test suite (injection, sort-field abuse, oversized filters) | M | P1a-10 | All payloads rejected or bound. DB unchanged |
 

@@ -10,6 +10,7 @@ class FilterIssueCode(StrEnum):
     INVALID_VALUE_COUNT = "INVALID_VALUE_COUNT"
     DATE_OUT_OF_RANGE = "DATE_OUT_OF_RANGE"
     FIELD_NOT_SORTABLE = "FIELD_NOT_SORTABLE"
+    INVALID_REQUEST_SHAPE = "INVALID_REQUEST_SHAPE"  # malformed JSON, unknown keys, limits
 
 
 class FilterValidationIssue(ContractModel):

@@ -1,6 +1,6 @@
 ALEMBIC := uv run alembic -c packages/transaction_database/alembic.ini
 
-.PHONY: install up up-phase2 down reset-db migrate seed lint format test
+.PHONY: install up up-phase2 down reset-db migrate seed run-transaction-service lint format test
 
 install:
 	uv sync
@@ -23,6 +23,9 @@ migrate:
 
 seed:
 	uv run python -m transaction_database.seed
+
+run-transaction-service:
+	uv run uvicorn transaction_service.main:create_app --factory --port 8200 --reload
 
 lint:
 	uv run ruff check .

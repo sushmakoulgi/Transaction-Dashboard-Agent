@@ -4,10 +4,12 @@ version = "0.1.0"
 description = "Read-only REST API for searching transactions and chargebacks with safe dynamic filters."
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115",
     "pydantic-settings>=2.6",
     "shared",
     "sqlalchemy[asyncio]>=2.0.36",
     "transaction-database",
+    "uvicorn[standard]>=0.32",
 ]
 
 [tool.uv.sources]

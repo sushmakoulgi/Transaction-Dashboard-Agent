@@ -1,3 +1,4 @@
+from shared.contracts.api_responses import ErrorResponse, FilterValidationResult, HealthStatus
 from shared.contracts.filter_expression import (
     FilterCondition,
     FilterGroup,
@@ -27,13 +28,16 @@ __all__ = [
     "ChargebackDetail",
     "ChargebackEventDetail",
     "ChargebackSummary",
+    "ErrorResponse",
     "FilterCondition",
     "FilterGroup",
     "FilterIssueCode",
     "FilterNode",
     "FilterValidationIssue",
+    "FilterValidationResult",
     "FilterValue",
     "FilterableFieldDescription",
+    "HealthStatus",
     "Operator",
     "PaginatedResult",
     "PaymentDetail",
