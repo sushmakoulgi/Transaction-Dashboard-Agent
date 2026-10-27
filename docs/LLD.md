@@ -30,6 +30,7 @@ Transaction_Dashboard/
 │       ├── config/settings.py        # BaseServiceSettings, DatabaseSettings (pydantic-settings)
 │       ├── clock.py                  # Clock protocol, SystemClock, FixedClock
 │       ├── logging/setup.py
+│       ├── clients/transaction_service_client.py  # TransactionServiceClient (MCP server + agent)
 │       ├── http/bearer_auth.py       # require_bearer_token(): constant-time static bearer token
 │       └── contracts/                # Pydantic DTOs shared across services
 │           ├── filter_expression.py  # FilterCondition, FilterGroup, FilterNode
@@ -68,7 +69,6 @@ Transaction_Dashboard/
 │   │       └── transaction_detail_service.py  # full aggregate; 404 outside the current year
 │   ├── mcp_server/src/mcp_server/
 │   │   ├── main.py                   # FastMCP app, streamable HTTP, auth
-│   │   ├── transaction_service_client.py
 │   │   └── tools/
 │   │       ├── search_tools.py
 │   │       ├── detail_tools.py
@@ -486,7 +486,11 @@ class SearchableRepository[ItemT]:
 - Tool descriptions spell out the filter language, the relative-date values, and "call `list_filterable_fields` when unsure of a field name".
 - A 422 from the Transaction Service becomes an MCP tool error containing the issue list, so outside clients get the same chance to correct themselves.
 - Auth: `Authorization: Bearer <MCP_API_TOKEN>` is checked by middleware. The token is shared by the agent and outside clients (single user).
-- `TransactionServiceClient` is one `httpx.AsyncClient` wrapper with timeouts and retries, and is the only HTTP code in this service.
+- **`TransactionServiceClient`** (`shared/clients/transaction_service_client.py`) is shared by the MCP server and the agent's `PlanExecutor`.
+  - It is one `httpx.AsyncClient` with the bearer token, a 10 s timeout, and typed methods for every endpoint, returning the shared contract models.
+  - **Retries:** every endpoint only reads data, so every call (including POST searches) is safe to retry. Retries happen on connection errors, timeouts and 502/503/504, up to 2 times with exponential backoff. 4xx and other 5xx responses are never retried.
+  - **Errors:** `ErrorResponse` bodies become `TransactionServiceError(status_code, error, message, issues)`, so the MCP tools can hand Claude the exact problems. If the service stays unreachable, it raises `TransactionServiceUnavailableError`.
+  - `PaginatedResult` accepts its own serialized `total_pages` when read back, and rejects it if it doesn't match `total_count / page_size`.
 
 ## 6. Agent Service (`:8000`, prefix `/api`)
 
@@ -589,7 +593,7 @@ class SessionStore(Protocol):
 - `ToolDefinitionMapper` converts an MCP `Tool` to `{name, description, input_schema}` for the Anthropic API. The tool list is sorted, so the prompt prefix stays identical and cacheable.
 
 ### 6.6 Plan executor (`plan_execution/plan_executor.py`)
-- `PlanExecutor.execute(plan, page, page_size)` runs the steps in order against the Transaction Service over HTTP (the same `httpx` client pattern as the MCP server). Page and page_size are applied to the last search step.
+- `PlanExecutor.execute(plan, page, page_size)` runs the steps in order against the Transaction Service over HTTP (through the shared `TransactionServiceClient`). Page and page_size are applied to the last search step.
 - Used by `/plans/execute` for paging, and in Phase 2 for cache or RAG hits.
 
 ## 7. Phase 2 — Plan resolution
@@ -743,12 +747,11 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate), both limited to the current year | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence. A search without a date filter and a detail lookup never return rows outside the current year ✅ |
 | P1a-10 | Routes, 422/404 error mapping, bearer auth, `/health` | M | P1a-9 | OpenAPI docs render. Validation errors return the issue list ✅ |
 | P1a-11 | Integration tests for UC1–UC5 + OR/NOT cases | M | P1a-10, P0-6 | All pass against seeded Postgres ✅ |
-| P1a-12 | Security test suite (injection, sort-field abuse, oversized filters) | M | P1a-10 | All payloads rejected or bound. DB unchanged |
 
 ### Phase 1b — MCP Server
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
-| P1b-1 | `TransactionServiceClient` (httpx, timeouts, retries, token) | S | P1a-10 | Unit tested with respx |
+| P1b-1 | `TransactionServiceClient` (httpx, timeouts, retries, token) | S | P1a-10 | Unit tested with httpx's mock transport, plus against the real service in-process (now in `shared/clients`) ✅ |
 | P1b-2 | FastMCP app, Streamable HTTP transport, bearer-token middleware | S | P0-3 | Unauthenticated requests rejected |
 | P1b-3 | 5 tools with detailed descriptions; schemas from shared contracts; 422 → tool error with issues | M | P1b-1, P1b-2 | MCP Inspector lists the tools and runs each successfully |
 | P1b-4 | Contract tests + doc for connecting Claude Desktop / other clients | S | P1b-3 | README section verified with a real client |
@@ -803,6 +806,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P3-2 | Structured JSON logs + request IDs across all services | S | One request can be traced across all services |
 | P3-3 | Token and cost metrics per chat turn | S | Shown in logs/metrics |
 | P3-4 | Swap `InMemorySessionStore` → `RedisSessionStore` | S | Sessions survive an agent restart |
+| P3-5 | Security test suite (injection, sort-field abuse, oversized filters) (moved from P1a-12 on 2026-10-27, to run at the end) | M | All payloads rejected or bound. DB unchanged |
 
 ### Critical path
 `P0-1 → P0-4 → P1a-3 → P1a-6 → P1a-8 → P1a-10 → P1b-3 → P1c-2 → P1c-5 → P1c-7 → P1d-3 → P1d-4`

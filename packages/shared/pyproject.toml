@@ -5,6 +5,7 @@ description = "Configuration and contracts shared by all Transaction Dashboard s
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "httpx>=0.27",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
 ]

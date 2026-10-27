@@ -37,3 +37,15 @@ def test_validation_issue_serializes_with_code_and_suggestions() -> None:
         suggestions=["customer_id"],
     )
     assert issue.model_dump(mode="json")["code"] == "UNKNOWN_FIELD"
+
+
+def test_serialized_result_can_be_read_back() -> None:
+    result = PaginatedResult[str](items=["a"], page=1, page_size=25, total_count=51)
+    assert PaginatedResult[str].model_validate(result.model_dump(mode="json")) == result
+
+
+def test_rejects_a_total_pages_that_does_not_match() -> None:
+    with pytest.raises(ValidationError, match="total_pages 9 does not match"):
+        PaginatedResult[str].model_validate(
+            {"items": [], "page": 1, "page_size": 25, "total_count": 51, "total_pages": 9}
+        )

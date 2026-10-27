@@ -57,6 +57,15 @@ async def search_chargebacks(
     return await search_service.search_chargebacks(request)
 
 
+# Must be registered before /transactions/{transaction_id}, which would otherwise match
+# /transactions/filterable-fields and reject "filterable-fields" as a UUID.
+@router.get("/{entity}/filterable-fields", response_model=list[FilterableFieldDescription])
+async def list_filterable_fields(
+    entity: SearchableEntity, search_service: SearchServiceDependency
+) -> list[FilterableFieldDescription]:
+    return search_service.describe_fields(entity)
+
+
 @router.get(
     "/transactions/{transaction_id}",
     response_model=TransactionDetail,
@@ -66,13 +75,6 @@ async def get_transaction_detail(
     transaction_id: uuid.UUID, detail_service: TransactionDetailServiceDependency
 ) -> TransactionDetail:
     return await detail_service.get_transaction_detail(transaction_id)
-
-
-@router.get("/{entity}/filterable-fields", response_model=list[FilterableFieldDescription])
-async def list_filterable_fields(
-    entity: SearchableEntity, search_service: SearchServiceDependency
-) -> list[FilterableFieldDescription]:
-    return search_service.describe_fields(entity)
 
 
 @router.post(

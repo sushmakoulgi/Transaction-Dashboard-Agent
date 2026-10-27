@@ -155,11 +155,20 @@ async def test_malformed_transaction_id_returns_422(client: httpx.AsyncClient) -
 # --- Metadata ---
 
 
-async def test_lists_filterable_fields(client: httpx.AsyncClient) -> None:
-    response = await client.get("/api/v1/chargebacks/filterable-fields", headers=AUTHORIZED)
+@pytest.mark.parametrize(
+    ("entity", "expected_fields"),
+    [
+        ("transactions", {"customer_id", "card_brand", "has_refund"}),
+        ("chargebacks", {"opened_at", "chargeback_event_type"}),
+    ],
+)
+async def test_lists_filterable_fields(
+    client: httpx.AsyncClient, entity: str, expected_fields: set[str]
+) -> None:
+    # /transactions/filterable-fields must not be taken for /transactions/{transaction_id}.
+    response = await client.get(f"/api/v1/{entity}/filterable-fields", headers=AUTHORIZED)
     assert response.status_code == 200
-    names = {field["name"] for field in response.json()}
-    assert {"opened_at", "chargeback_event_type"} <= names
+    assert expected_fields <= {field["name"] for field in response.json()}
 
 
 async def test_unknown_entity_returns_422(client: httpx.AsyncClient) -> None:
