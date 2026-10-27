@@ -15,8 +15,17 @@ from shared.contracts.filterable_field_description import (
 from shared.contracts.paginated_result import PaginatedResult
 from shared.contracts.search_request import SearchRequest, SortSpec
 from shared.contracts.search_results import ChargebackSummary, TransactionSummary
+from shared.contracts.transaction_detail import (
+    ChargebackDetail,
+    ChargebackEventDetail,
+    PaymentDetail,
+    RefundDetail,
+    TransactionDetail,
+)
 
 __all__ = [
+    "ChargebackDetail",
+    "ChargebackEventDetail",
     "ChargebackSummary",
     "FilterCondition",
     "FilterGroup",
@@ -27,10 +36,13 @@ __all__ = [
     "FilterableFieldDescription",
     "Operator",
     "PaginatedResult",
+    "PaymentDetail",
+    "RefundDetail",
     "RelativeDatePeriod",
     "RelativeDateValue",
     "SearchRequest",
     "SearchableEntity",
     "SortSpec",
+    "TransactionDetail",
     "TransactionSummary",
 ]

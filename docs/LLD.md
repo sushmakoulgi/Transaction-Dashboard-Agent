@@ -36,7 +36,9 @@ Transaction_Dashboard/
 │           ├── search_request.py     # SearchRequest, SortSpec
 │           ├── paginated_result.py   # PaginatedResult[T]
 │           ├── query_plan.py         # QueryPlan, QueryPlanStep (added in Phase 1c)
-│           └── filter_validation_issue.py  # FilterValidationIssue, FilterIssueCode
+│           ├── filter_validation_issue.py  # FilterValidationIssue, FilterIssueCode
+│           ├── search_results.py     # TransactionSummary, ChargebackSummary
+│           └── transaction_detail.py # TransactionDetail + payment / refund / chargeback / event
 ├── services/
 │   ├── transaction_service/src/transaction_service/
 │   │   ├── main.py                   # app factory
@@ -61,10 +63,9 @@ Transaction_Dashboard/
 │   │   ├── repositories/
 │   │   │   ├── searchable_repository.py   # generic count + page, stable sort, year scope
 │   │   │   └── search_definitions.py      # transaction + chargeback result columns ← add columns here
-│   │   ├── services/
-│   │   │   ├── search_service.py     # validate → compile → query
-│   │   │   └── transaction_detail_service.py
-│   │   └── schemas/                  # response DTOs (TransactionSummary, TransactionDetail, ...)
+│   │   └── services/
+│   │       ├── search_service.py     # validate → current-year scope → repository; validate(); describe_fields()
+│   │       └── transaction_detail_service.py  # full aggregate; 404 outside the current year
 │   ├── mcp_server/src/mcp_server/
 │   │   ├── main.py                   # FastMCP app, streamable HTTP, auth
 │   │   ├── transaction_service_client.py
@@ -424,6 +425,18 @@ class SearchableRepository[ItemT]:
   - `ChargebackSummary` adds the transaction's `currency` and `transaction_date`, the `network`, and `latest_event_type` (a correlated subquery on the highest `event_sequence`).
 - **Adding a searchable entity:** a field registry plus one `SearchQueryDefinition`. Adding a result column: one entry in `result_columns` plus the model field.
 
+### 3.6 Services (`services/search_service.py`, `services/transaction_detail_service.py`)
+- **`SearchService(database, validator, calendar, compiler)`:**
+  - `search_transactions(request)` / `search_chargebacks(request)` validate the request against the entity's registry. On failure they raise `FilterValidationFailedError` with every issue, which becomes HTTP 422 in P1a-10.
+  - On success they run `SearchableRepository` in one read-only session, scoped to `calendar.current_year_range()`.
+  - `validate(entity, request) -> list[FilterValidationIssue]` (empty means valid) backs `/filters/validate` and the MCP `validate_filters` tool.
+  - `describe_fields(entity)` backs `list_filterable_fields`.
+- **`TransactionDetailService(database, calendar)`:**
+  - `get_transaction_detail(id) -> TransactionDetail` loads the transaction, its payment and refunds, and its chargeback and events with `selectinload`.
+  - It raises `TransactionNotFoundError` (HTTP 404) for an unknown ID *and* for a transaction outside the current year.
+  - Refunds come back oldest first, and events in `event_sequence` order.
+- **Verified:** a service whose clock is set to last year finds 0 transactions and 0 chargebacks with no date filter, and returns 404 for a transaction it can see in the current year.
+
 ## 4. Transaction Service API (`:8200`, prefix `/api/v1`, bearer auth)
 
 | Method | Path | Body / params | Returns |
@@ -717,7 +730,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1a-6 | `FilterCompiler` (operator map, AND/OR/NOT, 1:1 joins, 1:n EXISTS) | L | P1a-3, P1a-4 | SQL snapshot tests. No string interpolation of values. OR + NOT + nested compile correctly ✅ |
 | P1a-7 | Read-only async DB session factory | S | P0-5 | Sessions use `app_readonly`. An attempted write raises ✅ |
 | P1a-8 | `SearchableRepository` + transaction/chargeback repositories (count + page, stable sort) | M | P1a-6, P1a-7 | Correct `total_count` with 1:n filters (no duplicates) ✅ |
-| P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate), both limited to the current year | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence. A search without a date filter and a detail lookup never return rows outside the current year |
+| P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate), both limited to the current year | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence. A search without a date filter and a detail lookup never return rows outside the current year ✅ |
 | P1a-10 | Routes, 422/404 error mapping, bearer auth, `/health` | M | P1a-9 | OpenAPI docs render. Validation errors return the issue list |
 | P1a-11 | Integration tests for UC1–UC5 + OR/NOT cases | M | P1a-10, P0-6 | All pass against seeded Postgres |
 | P1a-12 | Security test suite (injection, sort-field abuse, oversized filters) | M | P1a-10 | All payloads rejected or bound. DB unchanged |
