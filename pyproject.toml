@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Natural-language transaction dashboard: Claude agent, MCP tools, read-only Transaction Service."
 requires-python = ">=3.12"
 dependencies = [
+    "mcp-server",
     "shared",
     "transaction-database",
     "transaction-service",
@@ -16,6 +17,7 @@ package = false
 members = ["packages/*", "services/*"]
 
 [tool.uv.sources]
+mcp-server = { workspace = true }
 shared = { workspace = true }
 transaction-database = { workspace = true }
 transaction-service = { workspace = true }
@@ -41,7 +43,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "N", "RUF"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-packages = ["shared", "transaction_database", "transaction_service"]
+packages = ["mcp_server", "shared", "transaction_database", "transaction_service"]
 
 [tool.pyright]
 # Lets Pylance / Pyright in the editor use the project's virtual environment.
@@ -55,4 +57,4 @@ asyncio_mode = "auto"
 markers = ["integration: needs the docker-compose Postgres (make up migrate)"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["shared", "transaction_database", "transaction_service"]
+known-first-party = ["mcp_server", "shared", "transaction_database", "transaction_service"]

@@ -68,7 +68,8 @@ Transaction_Dashboard/
 │   │       ├── search_service.py     # validate → current-year scope → repository; validate(); describe_fields()
 │   │       └── transaction_detail_service.py  # full aggregate; 404 outside the current year
 │   ├── mcp_server/src/mcp_server/
-│   │   ├── main.py                   # FastMCP app, streamable HTTP, auth
+│   │   ├── main.py                   # create_app(): MCPServer (mcp 2.x), Streamable HTTP, auth, /health
+│   │   ├── settings.py               # McpServerSettings (MCP token, Transaction Service URL + token)
 │   │   └── tools/
 │   │       ├── search_tools.py
 │   │       ├── detail_tools.py
@@ -473,6 +474,19 @@ class SearchableRepository[ItemT]:
 
 ## 5. MCP Server (`:8100`, Streamable HTTP at `/mcp`)
 
+### 5.0 App (`mcp_server/main.py`)
+- **SDK:** the official `mcp` Python SDK **2.x**, where FastMCP was renamed **`MCPServer`** (`from mcp.server.mcpserver import MCPServer`).
+- **Run:** `make run-mcp-server`, i.e. `uvicorn mcp_server.main:create_app --factory --port 8100`.
+- **Transport:** `streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True)`. Tool calls are self-contained request/response calls, so no session state is kept and answers are plain JSON.
+- **DNS-rebinding protection** stays on (the SDK default). It accepts only `127.0.0.1`, `localhost` and `[::1]` as the Host. Containerizing (P1d-4) will need explicit `allowed_hosts`.
+- **Auth:** `BearerTokenMiddleware` (shared, constant-time) wraps the app. `/mcp` needs `Authorization: Bearer $MCP_API_TOKEN`, which is separate from the Transaction Service token; `/health` is open. Failures return 401 in the shared `ErrorResponse` shape.
+  - We deliberately don't use the SDK's `token_verifier` / `AuthSettings`. That is OAuth resource-server mode: it needs an `issuer_url` and advertises OAuth discovery for an authorization server we don't run.
+- **Lifespan:** creates one `TransactionServiceClient` (`TRANSACTION_SERVICE_URL`, `TRANSACTION_SERVICE_API_TOKEN`) in `McpServerResources`, shared by every tool call.
+- **Verified** under real uvicorn with the SDK's own client:
+  - It lists the tools and calls `ping` (a placeholder until P1b-3).
+  - A wrong or missing token gets 401.
+  - A foreign `Host` header is rejected.
+
 ### 5.1 Tools
 | Tool | Input | Maps to |
 |---|---|---|
@@ -752,7 +766,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
 | P1b-1 | `TransactionServiceClient` (httpx, timeouts, retries, token) | S | P1a-10 | Unit tested with httpx's mock transport, plus against the real service in-process (now in `shared/clients`) ✅ |
-| P1b-2 | FastMCP app, Streamable HTTP transport, bearer-token middleware | S | P0-3 | Unauthenticated requests rejected |
+| P1b-2 | FastMCP app, Streamable HTTP transport, bearer-token middleware | S | P0-3 | Unauthenticated requests rejected ✅ |
 | P1b-3 | 5 tools with detailed descriptions; schemas from shared contracts; 422 → tool error with issues | M | P1b-1, P1b-2 | MCP Inspector lists the tools and runs each successfully |
 | P1b-4 | Contract tests + doc for connecting Claude Desktop / other clients | S | P1b-3 | README section verified with a real client |
 

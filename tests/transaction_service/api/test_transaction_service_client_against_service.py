@@ -25,11 +25,14 @@ pytestmark = pytest.mark.integration
 async def service_client() -> AsyncIterator[TransactionServiceClient]:
     app = create_app(settings_for(str(DatabaseSettings().postgres_dsn_readonly)))
     try:
-        async with app.router.lifespan_context(app), TransactionServiceClient(
-            "http://transaction-service",
-            SecretStr(API_TOKEN),
-            transport=httpx.ASGITransport(app=app),
-        ) as client:
+        async with (
+            app.router.lifespan_context(app),
+            TransactionServiceClient(
+                "http://transaction-service",
+                SecretStr(API_TOKEN),
+                transport=httpx.ASGITransport(app=app),
+            ) as client,
+        ):
             yield client
     except OperationalError as error:
         pytest.skip(f"Postgres is not reachable: {error.orig}")
