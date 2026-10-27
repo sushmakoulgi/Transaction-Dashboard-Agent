@@ -1,23 +1,17 @@
-from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pytest
+from filter_test_helpers import build_validator, condition, group, utc
 
-from shared.clock import FixedClock
 from shared.contracts import FilterIssueCode, Operator, SearchRequest
-from transaction_service.filtering.business_calendar import BusinessCalendar
-from transaction_service.filtering.condition_resolver import ConditionResolver
 from transaction_service.filtering.entity_field_registries import (
     CHARGEBACK_FIELD_REGISTRY,
     TRANSACTION_FIELD_REGISTRY,
 )
 from transaction_service.filtering.field_registry import FieldRegistry
-from transaction_service.filtering.field_types import FieldValueCoercer
 from transaction_service.filtering.filter_validator import (
     FilterValidationFailedError,
-    FilterValidator,
     ValidatedSearch,
 )
 from transaction_service.filtering.resolved_filter import (
@@ -32,26 +26,7 @@ from transaction_service.filtering.resolved_filter import (
     TextContains,
 )
 
-NEW_YORK = ZoneInfo("America/New_York")
-# 2026-10-27 11:00 in New York (EDT, UTC-4).
-VALIDATOR = FilterValidator(
-    ConditionResolver(
-        FieldValueCoercer(NEW_YORK),
-        BusinessCalendar(NEW_YORK, FixedClock(datetime(2026, 10, 27, 15, tzinfo=UTC))),
-    )
-)
-
-
-def utc(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> datetime:
-    return datetime(year, month, day, hour, minute, tzinfo=UTC)
-
-
-def condition(field: str, operator: str, value: Any = None) -> dict[str, Any]:
-    return {"kind": "condition", "field": field, "operator": operator, "value": value}
-
-
-def group(*children: dict[str, Any], logic: str = "and", negate: bool = False) -> dict[str, Any]:
-    return {"kind": "group", "logic": logic, "negate": negate, "children": list(children)}
+VALIDATOR = build_validator()
 
 
 def validate(

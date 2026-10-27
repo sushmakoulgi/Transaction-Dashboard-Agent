@@ -40,15 +40,15 @@ Transaction_Dashboard/
 ├── services/
 │   ├── transaction_service/src/transaction_service/
 │   │   ├── main.py                   # app factory
+│   │   ├── settings.py               # TransactionServiceSettings (read-only DSN, timezone, pool)
 │   │   ├── api/
 │   │   │   ├── dependencies.py       # session + service wiring
 │   │   │   ├── transaction_routes.py
 │   │   │   ├── chargeback_routes.py
 │   │   │   └── metadata_routes.py    # fields + validate
 │   │   ├── persistence/
-│   │   │   └── database.py           # async engine, read-only session factory
+│   │   │   └── database.py           # ReadOnlyDatabase: async engine, read-only sessions, startup write check
 │   │   ├── filtering/
-│   │   │   ├── operators.py          # Operator enum + OPERATOR_COMPILERS map
 │   │   │   ├── field_types.py        # FieldType + value coercers
 │   │   │   ├── filterable_field.py   # FilterableField, Relation (ONE → join, MANY → EXISTS)
 │   │   │   ├── field_registry.py     # FieldRegistry (lookup, suggestions, describe)
@@ -350,16 +350,33 @@ Shape limits (field-name pattern, depth ≤ 3, ≤ 20 conditions, lists of 1–5
 Example: `transaction_date gt "2026-10-15"` becomes `≥ 2026-10-16 00:00` New York time.
 
 ### 3.4 Compiler (`filter_compiler.py`)
-- `FilterCompiler.compile(resolved_node) -> CompiledFilter(where_clause, required_joins)`. The input is the validator's resolved tree, so every value is already typed and checked.
-- `OPERATOR_COMPILERS: dict[Operator, Callable[[ColumnElement, Any], ColumnElement[bool]]]` maps each operator to a function, e.g. `{EQUALS: lambda col, v: col == v, IN: lambda col, v: col.in_(v), CONTAINS: lambda col, v: col.ilike(f"%{escape_like(v)}%"), ...}`. Values are always bound parameters.
-- A group compiles to `and_(*children)` / `or_(*children)`, wrapped in `not_()` when `negate` is set.
-- `MANY`-relation fields compile to `exists(select(1).where(<correlation>, <predicate>))`. This avoids duplicate rows.
-- **AND means "the same related row" (confirmed 2026-10-27).** Within one AND group, all direct child conditions on the same MANY relation are merged into **one** `EXISTS` subquery.
-  - `refund_status = COMPLETED AND refunded_at this_month` means *one refund* that is completed and was made this month.
-  - Under OR, each condition gets its own `EXISTS` ("any refund matches A, or any refund matches B").
-  - Conditions in different nested groups are not merged; each group is compiled on its own.
-  - A negated group wraps its merged `EXISTS` in `NOT`. Example: `NOT (refund_status = FAILED)` means "no refund has status FAILED".
+- `FilterCompiler().compile(resolved_node) -> CompiledFilter(where_clause, required_relations)`. The input is the validator's resolved tree, so every value is already typed and checked.
+- `join_required_relations(statement, required_relations)` adds the LEFT JOINs. Only one-to-one relations the filter actually uses are joined, each once, with `via` relations first.
+- **Bound parameters only.** Every value, and every JSON key (from the registry), is a bound parameter. A test sends `C-1'; DROP TABLE transactions; --` and checks that it appears only in the parameters.
+- **Predicate → SQL:**
+  - `Comparison` uses the `COMPARISON_BUILDERS` lookup table.
+  - `Range` is `>= start AND < end`, or `<= end` when the end is inclusive.
+  - `Membership` is `IN`.
+  - `TextContains` is `ILIKE '%…%' ESCAPE '\'`, with `%`, `_` and `\` escaped.
+  - `NullCheck` is `IS [NOT] NULL`.
+- **One-to-many relations** (refunds, chargeback events) become `EXISTS (SELECT 1 FROM <target> WHERE <join_condition> AND …)`, correlated to the outer row (`correlate_except(target)`). Root rows are never duplicated.
+- **AND means "the same related row" (confirmed 2026-10-27).** Within one AND group, all direct child *value* conditions on the same one-to-many relation share **one** `EXISTS`.
+  - `refund_status = COMPLETED AND refunded_at this_month` means one refund that is both completed and made this month.
+  - `exists` checks (`has_refund`) are never merged.
+  - Under OR, each condition gets its own `EXISTS`.
+  - Conditions in different nested groups are not merged.
   - Chargeback events follow the same rule.
+  - Verified against the seed: 6 payments have both a COMPLETED and a PENDING refund, yet `refund_status = COMPLETED AND refund_status = PENDING` correctly matches nothing.
+- **Presence checks:**
+  - `has_chargeback` (one-to-one) compiles to `chargebacks.chargeback_id IS [NOT] NULL` over the LEFT JOIN.
+  - `has_refund` (one-to-many) compiles to `[NOT] EXISTS`.
+- **Negation is the exact complement**, including rows where the field is empty (e.g. "not Amex" includes ACH payments, which have no card brand):
+  - `neq` → `IS DISTINCT FROM`.
+  - `not_in` → `IS NULL OR NOT IN`.
+  - A negated range or group → `NOT coalesce(…, false)`.
+  - Positive comparisons keep normal SQL behaviour: an empty field never matches.
+
+### 3.4a Business calendar and the current-year limit (`business_calendar.py`)
 - `BusinessCalendar(business_timezone, clock)` is in `business_calendar.py`; `Clock` / `SystemClock` / `FixedClock` are in `shared/clock.py`. All ranges are half-open `[start, end)` in UTC.
   - `resolve(RelativeDateValue)`:
     - `today` and `yesterday` are whole business days.
@@ -375,6 +392,14 @@ Example: `transaction_date gt "2026-10-15"` becomes `≥ 2026-10-16 00:00` New Y
   - `resolve()` rejects relative ranges that reach outside the year, e.g. `last_month` in January, or `last_n_days: 11` on Jan 10.
   - `ensure_in_current_year(value)` rejects explicit dates and date-times outside the year.
   - The validator (P1a-5) calls both and turns `DateOutsideAllowedRangeError` into a `DATE_OUT_OF_RANGE` issue.
+
+### 3.4b Read-only database access (`persistence/database.py`, `settings.py`)
+- `ReadOnlyDatabase(database_url, pool_size, max_overflow)` uses an async SQLAlchemy engine on the existing psycopg driver (no second Postgres driver).
+- `TransactionServiceSettings` needs only `POSTGRES_DSN_READONLY`, plus `BUSINESS_TIMEZONE` and the pool sizes.
+- **Two layers keep the service read-only:**
+  1. `ensure_cannot_write()` runs at startup. It checks `has_table_privilege(... 'INSERT, UPDATE, DELETE, TRUNCATE')` for every table in `public` via `pg_class`, and refuses to start (`WritableDatabaseAccountError`, naming the tables) if the account could write.
+  2. `session()` opens every session with `SET TRANSACTION READ ONLY` and always rolls back at the end. Writes fail even if the service were given the owner account.
+- Verified against Postgres: the owner account fails the startup check, and an INSERT through a session that uses it is rejected with "read-only transaction".
 
 ### 3.5 Generic search (`searchable_repository.py`, `search_service.py`)
 ```python
@@ -685,8 +710,8 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1a-3 | `FilterableField`, `FieldRegistry` (+ suggestions) and the transaction / chargeback registries, including JSON-path fields | M | P1a-2 | Registries list every field in §3.2. `suggest_similar("cust_id")` → `customer_id` ✅ |
 | P1a-4 | `BusinessCalendar` with injected clock + current-year limit | S | P1a-1 | `this_month` / `last_month` / `last_n_days` correct across month and DST boundaries in ET. Dates outside the current year rejected ✅ |
 | P1a-5 | `FilterValidator` (tree walk against the registry, all issue codes) → resolved tree | M | P1a-3 | Every issue code covered. All issues returned in one pass, with the right path ✅ |
-| P1a-6 | `FilterCompiler` (operator map, AND/OR/NOT, 1:1 joins, 1:n EXISTS) | L | P1a-3, P1a-4 | SQL snapshot tests. No string interpolation of values. OR + NOT + nested compile correctly |
-| P1a-7 | Read-only async DB session factory | S | P0-5 | Sessions use `app_readonly`. An attempted write raises |
+| P1a-6 | `FilterCompiler` (operator map, AND/OR/NOT, 1:1 joins, 1:n EXISTS) | L | P1a-3, P1a-4 | SQL snapshot tests. No string interpolation of values. OR + NOT + nested compile correctly ✅ |
+| P1a-7 | Read-only async DB session factory | S | P0-5 | Sessions use `app_readonly`. An attempted write raises ✅ |
 | P1a-8 | `SearchableRepository` + transaction/chargeback repositories (count + page, stable sort) | M | P1a-6, P1a-7 | Correct `total_count` with 1:n filters (no duplicates) |
 | P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate), both limited to the current year | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence. A search without a date filter and a detail lookup never return rows outside the current year |
 | P1a-10 | Routes, 422/404 error mapping, bearer auth, `/health` | M | P1a-9 | OpenAPI docs render. Validation errors return the issue list |

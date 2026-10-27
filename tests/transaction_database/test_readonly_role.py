@@ -3,27 +3,11 @@
 Requires the docker-compose Postgres with migrations applied (`make up migrate`).
 """
 
-from collections.abc import Iterator
-
 import pytest
-from sqlalchemy import Connection, create_engine, text
-from sqlalchemy.exc import DBAPIError, OperationalError
-
-from shared.config import DatabaseSettings
+from sqlalchemy import Connection, text
+from sqlalchemy.exc import DBAPIError
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture
-def readonly_connection() -> Iterator[Connection]:
-    engine = create_engine(str(DatabaseSettings().postgres_dsn_readonly))
-    try:
-        connection = engine.connect()
-    except OperationalError as error:
-        pytest.skip(f"Postgres is not reachable: {error.orig}")
-    with connection:
-        yield connection
-    engine.dispose()
 
 
 def test_can_select_from_every_table(readonly_connection: Connection) -> None:
