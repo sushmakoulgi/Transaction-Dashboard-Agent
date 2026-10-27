@@ -5,51 +5,19 @@ docker-compose Postgres. Requests go through httpx without a network socket.
 """
 
 import uuid
-from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 import pytest
+from api_test_helpers import API_TOKEN, AUTHORIZED, post_search, settings_for
 from filter_test_helpers import condition, group
-from pydantic import SecretStr
 from sqlalchemy.exc import OperationalError
 
 from shared.config import DatabaseSettings
 from transaction_service.main import create_app
 from transaction_service.persistence.database import WritableDatabaseAccountError
-from transaction_service.settings import TransactionServiceSettings
 
 pytestmark = pytest.mark.integration
-
-API_TOKEN = "test-token-0123456789abcdef"
-AUTHORIZED = {"Authorization": f"Bearer {API_TOKEN}"}
-
-
-def settings_for(database_url: str) -> TransactionServiceSettings:
-    return TransactionServiceSettings(
-        postgres_dsn_readonly=database_url,  # type: ignore[arg-type]
-        transaction_service_api_token=SecretStr(API_TOKEN),
-    )
-
-
-@pytest.fixture
-async def client() -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(settings_for(str(DatabaseSettings().postgres_dsn_readonly)))
-    try:
-        async with app.router.lifespan_context(app):
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(
-                transport=transport, base_url="http://transaction-service"
-            ) as http_client:
-                yield http_client
-    except OperationalError as error:
-        pytest.skip(f"Postgres is not reachable: {error.orig}")
-
-
-async def post_search(
-    client: httpx.AsyncClient, entity: str, body: dict[str, Any]
-) -> httpx.Response:
-    return await client.post(f"/api/v1/{entity}/search", json=body, headers=AUTHORIZED)
 
 
 # --- Startup and auth ---

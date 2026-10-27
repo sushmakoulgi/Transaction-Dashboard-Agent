@@ -1,7 +1,8 @@
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
-from sqlalchemy import Connection, create_engine, text
+from database_test_helpers import connect_or_skip
+from sqlalchemy import Connection, create_engine
 from sqlalchemy.exc import OperationalError
 
 from shared.config import DatabaseSettings
@@ -19,17 +20,6 @@ def readonly_connection() -> Iterator[Connection]:
     with connection:
         yield connection
     engine.dispose()
-
-
-async def connect_or_skip(database_url: str) -> ReadOnlyDatabase:
-    database = ReadOnlyDatabase(database_url)
-    try:
-        async with database.session() as session:
-            await session.execute(text("SELECT 1"))
-    except OperationalError as error:
-        await database.dispose()
-        pytest.skip(f"Postgres is not reachable: {error.orig}")
-    return database
 
 
 @pytest.fixture

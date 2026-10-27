@@ -708,7 +708,7 @@ PLAN_SIMILARITY_THRESHOLD=0.90
 |---|---|
 | Unit | Validator (each issue code), compiler (generated SQL snapshots), relative dates (frozen clock, month and DST boundaries), slot substitutor, tool mapper |
 | Security | Injection payloads in field names, values, JSON paths and sort fields (`"; DROP TABLE"`, `' OR 1=1 --`, `customer_id) OR (1=1`). All are rejected or bound safely. An attempted write inside a read-only session fails |
-| Integration | Transaction Service against the real Postgres in docker-compose with seed data. All 5 use cases plus OR/NOT/nested cases |
+| Integration | Transaction Service against the real Postgres in docker-compose with seed data. All 5 use cases plus OR/NOT/nested cases, through the HTTP API (`tests/transaction_service/api/test_use_cases.py`). Each compares the **exact ID set** with hand-written SQL, collects every page, and checks there are no duplicates. Inputs (busiest day, customer, payment) come from the data, so the tests survive a re-seed |
 | Contract | MCP tool schemas match the shared Pydantic contracts |
 | Agent | Claude client stubbed with scripted responses to test the loop, error retry and plan recording. A small set of live tests (`-m live`) for natural-language → plan |
 | E2E | Playwright: ask a question → table shows → page 2 → (P2) open detail drawer |
@@ -742,7 +742,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1a-8 | `SearchableRepository` + transaction/chargeback repositories (count + page, stable sort) | M | P1a-6, P1a-7 | Correct `total_count` with 1:n filters (no duplicates) ✅ |
 | P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate), both limited to the current year | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence. A search without a date filter and a detail lookup never return rows outside the current year ✅ |
 | P1a-10 | Routes, 422/404 error mapping, bearer auth, `/health` | M | P1a-9 | OpenAPI docs render. Validation errors return the issue list ✅ |
-| P1a-11 | Integration tests for UC1–UC5 + OR/NOT cases | M | P1a-10, P0-6 | All pass against seeded Postgres |
+| P1a-11 | Integration tests for UC1–UC5 + OR/NOT cases | M | P1a-10, P0-6 | All pass against seeded Postgres ✅ |
 | P1a-12 | Security test suite (injection, sort-field abuse, oversized filters) | M | P1a-10 | All payloads rejected or bound. DB unchanged |
 
 ### Phase 1b — MCP Server

@@ -6,7 +6,7 @@ Requires the seeded docker-compose Postgres (`make up migrate seed`).
 from collections.abc import AsyncIterator
 
 import pytest
-from conftest import connect_or_skip
+from database_test_helpers import connect_or_skip
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
