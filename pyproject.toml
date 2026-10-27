@@ -1,0 +1,49 @@
+[project]
+name = "transaction-dashboard"
+version = "0.1.0"
+description = "Natural-language transaction dashboard: Claude agent, MCP tools, read-only Transaction Service."
+requires-python = ">=3.12"
+dependencies = [
+    "shared",
+    "transaction-database",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+shared = { workspace = true }
+transaction-database = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "N", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+packages = ["shared", "transaction_database"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["integration: needs the docker-compose Postgres (make up migrate)"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["shared", "transaction_database"]
