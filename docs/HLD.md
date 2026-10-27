@@ -249,6 +249,7 @@ erDiagram
 - Timestamps are stored as `timestamptz` (UTC).
 - Business calendar: **America/New_York** (the requested "EST"; it follows EST/EDT daylight-saving changes).
 - Relative ranges (`today`, `this_month`, `last_month`, `last_n_days:N`) are turned into exact `[start, end)` bounds **by the Transaction Service**, not by the LLM. Results are therefore deterministic, and cached Phase 2 plans stay correct as time passes.
+- **Only the current calendar year can be searched.** Any relative or explicit date outside it is rejected with a clear error (`DATE_OUT_OF_RANGE`); nothing is silently clipped.
 
 ## 10. Phases and milestones
 
@@ -271,7 +272,11 @@ erDiagram
 4. **`customer_id`** is stored on transactions, payments, refunds and chargebacks, and kept consistent by composite foreign keys (§6).
 5. **Embeddings provider:** Voyage AI (`voyageai` SDK), behind an `EmbeddingProvider` interface.
 6. **Session memory holds user questions and their query plans (tool + filters) only.** Query results, tool results and assistant replies are never stored. Tool results exist only inside the turn that produced them.
-7. **Chargeback event types** (assumed, can be changed in seed and enum): `OPENED`, `EVIDENCE_REQUESTED`, `EVIDENCE_SUBMITTED`, `REPRESENTMENT`, `PRE_ARBITRATION`, `ARBITRATION`, `WON`, `LOST`, `ACCEPTED`.
+7. **Search is limited to the current calendar year** (America/New_York).
+   - Dates outside it are rejected with an error, not clipped.
+   - Searches without a date filter are still limited to the current year (on `transaction_date` / `opened_at`), and so is the detail lookup.
+   - The sample data never goes before Jan 1.
+8. **Chargeback event types** (assumed, can be changed in seed and enum): `OPENED`, `EVIDENCE_REQUESTED`, `EVIDENCE_SUBMITTED`, `REPRESENTMENT`, `PRE_ARBITRATION`, `ARBITRATION`, `WON`, `LOST`, `ACCEPTED`.
 
 ## 12. Risks
 

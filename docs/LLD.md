@@ -28,14 +28,15 @@ Transaction_Dashboard/
 │   │       └── seed/                 # sample_data_generator.py, __main__.py (make seed)
 │   └── shared/src/shared/
 │       ├── config/settings.py        # BaseServiceSettings, DatabaseSettings (pydantic-settings)
+│       ├── clock.py                  # Clock protocol, SystemClock, FixedClock
 │       ├── logging/setup.py
 │       ├── http/bearer_auth.py       # FastAPI dependency: verify_bearer_token
 │       └── contracts/                # Pydantic DTOs shared across services
 │           ├── filter_expression.py  # FilterCondition, FilterGroup, FilterNode
 │           ├── search_request.py     # SearchRequest, SortSpec
 │           ├── paginated_result.py   # PaginatedResult[T]
-│           ├── query_plan.py         # QueryPlan, QueryPlanStep
-│           └── validation_error.py   # FilterValidationIssue
+│           ├── query_plan.py         # QueryPlan, QueryPlanStep (added in Phase 1c)
+│           └── filter_validation_issue.py  # FilterValidationIssue, FilterIssueCode
 ├── services/
 │   ├── transaction_service/src/transaction_service/
 │   │   ├── main.py                   # app factory
@@ -49,11 +50,14 @@ Transaction_Dashboard/
 │   │   ├── filtering/
 │   │   │   ├── operators.py          # Operator enum + OPERATOR_COMPILERS map
 │   │   │   ├── field_types.py        # FieldType + value coercers
-│   │   │   ├── filterable_field.py   # FilterableField, JoinStrategy
-│   │   │   ├── field_registry.py     # FieldRegistry + per-entity registries
-│   │   │   ├── relative_dates.py     # RelativeDateResolver (America/New_York)
-│   │   │   ├── filter_validator.py   # FilterValidator
-│   │   │   └── filter_compiler.py    # FilterCompiler: FilterNode → ColumnElement[bool]
+│   │   │   ├── filterable_field.py   # FilterableField, Relation (ONE → join, MANY → EXISTS)
+│   │   │   ├── field_registry.py     # FieldRegistry (lookup, suggestions, describe)
+│   │   │   ├── entity_field_registries.py  # transaction + chargeback field lists ← add filters here
+│   │   │   ├── business_calendar.py  # BusinessCalendar: relative dates, day ranges, current-year limit
+│   │   │   ├── condition_resolver.py # one condition → typed Predicate (dates resolved, year limit)
+│   │   │   ├── resolved_filter.py    # ResolvedGroup / ResolvedCondition / Predicate types
+│   │   │   ├── filter_validator.py   # FilterValidator → ValidatedSearch or all issues
+│   │   │   └── filter_compiler.py    # FilterCompiler: ResolvedNode → ColumnElement[bool]
 │   │   ├── repositories/
 │   │   │   ├── searchable_repository.py   # generic paginated search
 │   │   │   ├── transaction_repository.py
@@ -167,7 +171,7 @@ CREATE TABLE chargeback_events (
 
 ### 2.3 Seed data (`transaction_database.seed`)
 - Fixed Faker seed, so every run produces the same data.
-- 100 transactions spread over the last 90 days, with about 30% in the current month (America/New_York). Uses 15 customer IDs (`C-1001`…`C-1015`), so each customer has several transactions.
+- 100 transactions spread over the last 90 days, but **never before Jan 1 of the current year**, with about 30% in the current month (America/New_York). In January every transaction falls in the current month. Uses 15 customer IDs (`C-1001`…`C-1015`), so each customer has several transactions.
 - 1 payment per transaction, in a realistic status mix.
 - About 20% of payments have 1–2 refunds.
 - About 15% of transactions have a chargeback, about half of those opened this month. Each chargeback has 1–4 events in order.
@@ -256,60 +260,121 @@ class FieldType(StrEnum):
     STRING, DECIMAL, INTEGER, TIMESTAMP, ENUM, BOOLEAN, UUID
 
 
-class JoinStrategy(StrEnum):
-    BASE = "base"  # column on the root table
-    ONE_TO_ONE = "1:1"  # LEFT JOIN (payments, chargebacks)
-    ONE_TO_MANY = "1:n"  # correlated EXISTS subquery (refunds, chargeback_events)
+class RelationCardinality(StrEnum):
+    ONE = "one"    # LEFT JOIN (payment, chargeback)
+    MANY = "many"  # correlated EXISTS subquery (refunds, chargeback_events)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)    # eq=False: SQLAlchemy overloads == on columns
+class Relation:
+    name: str
+    cardinality: RelationCardinality
+    target: type[Base]
+    join_condition: ColumnElement[bool]   # links target to the root, or to `via`
+    via: Relation | None = None           # refunds are reached through the payment
+
+
+@dataclass(frozen=True, eq=False)
 class FilterableField:
-    public_name: str
-    description: str  # shown to the LLM via list_filterable_fields
+    name: str
+    description: str                      # shown to the LLM via list_filterable_fields
     field_type: FieldType
-    allowed_operators: frozenset[Operator]
-    column_resolver: Callable[
-        [], ColumnElement
-    ]  # e.g. lambda: Payment.payment_details["card_brand"].astext
-    join_strategy: JoinStrategy = JoinStrategy.BASE
-    relation_path: tuple[RelationshipStep, ...] = ()
+    column: SQLColumnExpression[Any]      # e.g. Payment.payment_details["card_brand"].astext
+    operators: frozenset[Operator]        # defaults per type; + is_null when nullable
+    relation: Relation | None = None      # None = column on the root table
     enum_values: tuple[str, ...] = ()
-    is_sortable: bool = False
+    is_sortable: bool = False             # not allowed on MANY relations
 
 
 class FieldRegistry:
-    def __init__(self, entity_name: str, fields: Iterable[FilterableField]): ...
-    def get_field(self, public_name: str) -> FilterableField | None: ...
-    def suggest_similar(self, unknown_name: str) -> list[str]: ...  # difflib
+    def __init__(self, entity: SearchableEntity, root_entity: type[Base],
+                 default_sort_field_name: str, fields: Sequence[FilterableField]): ...
+    def find_field(self, name: str) -> FilterableField | None: ...
+    def suggest_similar_names(self, unknown_name: str) -> list[str]: ...  # difflib
     def describe_fields(self) -> list[FilterableFieldDescription]: ...
 ```
-- **Transaction registry (initial):** `transaction_id`, `customer_id`, `amount`, `currency`, `transaction_type`, `transaction_date`, `merchant_category` (JSON), `merchant_name` (JSON), `merchant_country` (JSON), `payment_id`, `payment_status`, `payment_method`, `card_brand` (JSON), `has_chargeback`, `chargeback_status`, `chargeback_opened_at`, `chargeback_reason_code`, `has_refund`, `refund_status`, `refunded_at`.
+- **Helpers:**
+  - `filterable_field(...)` applies the default operators for the field's type.
+  - `related_row_exists_field(...)` builds the `has_chargeback` / `has_refund` fields, which allow only `exists`.
+- **Checked when the module loads:** duplicate names, enum fields without allowed values, `exists` on a field without a relation, and sorting on a MANY relation all raise an error.
+- **Transaction registry (initial):** `transaction_id`, `customer_id`, `amount`, `currency`, `transaction_type`, `transaction_date`, `merchant_category` (JSON), `merchant_name` (JSON), `merchant_country` (JSON), `payment_id`, `payment_status`, `payment_method`, `card_brand` (JSON), `captured_at`, `has_chargeback`, `chargeback_status`, `chargeback_opened_at`, `chargeback_reason_code`, `has_refund`, `refund_status`, `refunded_at`.
 - **Chargeback registry:** `chargeback_id`, `transaction_id`, `customer_id` (own column), `reason_code`, `chargeback_status`, `chargeback_amount`, `opened_at`, `network` (JSON), `chargeback_event_type` (1:n), `chargeback_event_date` (1:n).
-- **Adding a filter:** add one `FilterableField(...)` to the right registry. No other code changes (Open/Closed).
+- **Adding a filter:** add one entry in `entity_field_registries.py`. No other code changes (Open/Closed).
 
-### 3.3 Validator (`filter_validator.py`)
-`FilterValidator.validate(entity_registry, search_request) -> list[FilterValidationIssue]`. It walks the tree and collects **all** issues before returning:
-- Unknown field, with suggestions.
-- Operator not allowed for the field.
-- Value does not fit the type (coerced by `FieldType`), or an enum value is not in `enum_values`.
-- `between` needs exactly 2 values or a `RelativeDateValue`. `in` / `not_in` take 1–50 values.
-- Nesting deeper than `MAX_FILTER_DEPTH = 3`, or more than `MAX_FILTER_CONDITIONS = 20` conditions.
-- Sort field is not sortable.
+### 3.2a Value conversion (`field_types.py`)
+`FieldValueCoercer(business_timezone).coerce(field_type, raw_value, enum_values)` converts one scalar value, using one function per `FieldType` held in a lookup table:
+- **decimal:** numbers or numeric strings, converted exactly (`0.1` becomes `Decimal("0.1")`). Booleans, NaN and Infinity are rejected.
+- **integer:** whole numbers only. `2.0` is accepted; `2.5` is not.
+- **boolean:** `true` / `false`, or the strings "true" / "false".
+- **enum:** case-insensitive match, returned in canonical form. An unknown value lists the allowed values as suggestions.
+- **uuid:** standard UUID strings.
+- **string:** at most 200 characters.
+- **timestamp:** ISO 8601.
+  - A date-only value (`2026-10-15`) stays a `date`, so the compiler can treat it as the whole business day.
+  - A date-time without an offset is read in America/New_York.
+  - Date-times are returned in UTC.
+- Every failure raises `ValueCoercionError(message, suggestions)`, which the validator turns into an `INVALID_VALUE` issue.
 
-```python
-class FilterValidationIssue(BaseModel):
-    path: str  # "filter.children[2].children[0].field"
-    code: str  # UNKNOWN_FIELD, OPERATOR_NOT_ALLOWED, INVALID_VALUE, TOO_DEEP, ...
-    message: str
-    suggestions: list[str] = []
-```
+### 3.3 Validator (`filter_validator.py`, `condition_resolver.py`, `resolved_filter.py`)
+`FilterValidator(ConditionResolver(coercer, calendar)).validate(request, registry) -> ValidatedSearch` walks the whole tree without stopping early. It raises `FilterValidationFailedError(issues)` listing **every** problem, each with its exact path (`filter.children[1].children[0].operator`, `filter.value[2]`, `sort.field`):
+
+| Code | When |
+|---|---|
+| `UNKNOWN_FIELD` | Field or sort field not in the registry. Suggestions are close names |
+| `OPERATOR_NOT_ALLOWED` | The field doesn't allow the operator. Suggestions are the allowed operators |
+| `INVALID_VALUE` | Wrong type, unknown enum value (suggestions are the allowed values), missing value, a relative date on a non-date field, start after end |
+| `INVALID_VALUE_COUNT` | A list given for a single-value operator, a single value for `in` / `not_in`, or `between` without exactly 2 values |
+| `DATE_OUT_OF_RANGE` | An explicit or relative date outside the current year |
+| `FIELD_NOT_SORTABLE` | The sort field can't be sorted on. Suggestions are the sortable fields |
+
+Shape limits (field-name pattern, depth ≤ 3, ≤ 20 conditions, lists of 1–50) are already enforced by the shared contract when the request is parsed.
+
+**Output: a resolved tree** (`ResolvedGroup` / `ResolvedCondition(field, predicate)`). Fields are registry entries and values have their real types, so the compiler never sees raw strings:
+
+| Predicate | From |
+|---|---|
+| `Comparison(op, value)` | `eq` / `neq` / `gt` / `gte` / `lt` / `lte` on a scalar or a date-time |
+| `Range(start, end, end_is_exclusive, negate)` | `between`. Numbers are inclusive. A date endpoint covers its whole day (exclusive end); a date-time endpoint is an exact moment (inclusive) |
+| `Membership(values, negate)` | `in` / `not_in` |
+| `TextContains(text)` | `contains` |
+| `NullCheck(is_null)` | `is_null` (true by default) |
+| `RelatedRowCheck(should_exist)` | `exists` (true by default) |
+
+**Comparing with a whole period** (a date, or a relative date) works on the period's bounds:
+- `eq` → inside the period; `neq` → outside it.
+- `gt` → `≥ end` (strictly after the period).
+- `gte` → `≥ start`.
+- `lt` → `< start`.
+- `lte` → `< end`.
+
+Example: `transaction_date gt "2026-10-15"` becomes `≥ 2026-10-16 00:00` New York time.
 
 ### 3.4 Compiler (`filter_compiler.py`)
-- `FilterCompiler.compile(node, registry) -> CompiledFilter(where_clause, required_joins)`.
+- `FilterCompiler.compile(resolved_node) -> CompiledFilter(where_clause, required_joins)`. The input is the validator's resolved tree, so every value is already typed and checked.
 - `OPERATOR_COMPILERS: dict[Operator, Callable[[ColumnElement, Any], ColumnElement[bool]]]` maps each operator to a function, e.g. `{EQUALS: lambda col, v: col == v, IN: lambda col, v: col.in_(v), CONTAINS: lambda col, v: col.ilike(f"%{escape_like(v)}%"), ...}`. Values are always bound parameters.
 - A group compiles to `and_(*children)` / `or_(*children)`, wrapped in `not_()` when `negate` is set.
-- `ONE_TO_MANY` fields compile to `exists(select(1).where(<correlation>, <predicate>))`. This avoids duplicate rows.
-- `RelativeDateResolver(timezone="America/New_York", clock=Clock)` turns `{"relative": "this_month"}` into `[month_start, next_month_start)` in UTC. The clock is injected so tests can control time.
+- `MANY`-relation fields compile to `exists(select(1).where(<correlation>, <predicate>))`. This avoids duplicate rows.
+- **AND means "the same related row" (confirmed 2026-10-27).** Within one AND group, all direct child conditions on the same MANY relation are merged into **one** `EXISTS` subquery.
+  - `refund_status = COMPLETED AND refunded_at this_month` means *one refund* that is completed and was made this month.
+  - Under OR, each condition gets its own `EXISTS` ("any refund matches A, or any refund matches B").
+  - Conditions in different nested groups are not merged; each group is compiled on its own.
+  - A negated group wraps its merged `EXISTS` in `NOT`. Example: `NOT (refund_status = FAILED)` means "no refund has status FAILED".
+  - Chargeback events follow the same rule.
+- `BusinessCalendar(business_timezone, clock)` is in `business_calendar.py`; `Clock` / `SystemClock` / `FixedClock` are in `shared/clock.py`. All ranges are half-open `[start, end)` in UTC.
+  - `resolve(RelativeDateValue)`:
+    - `today` and `yesterday` are whole business days.
+    - `this_month` / `last_month` are calendar months.
+    - `this_year` runs from Jan 1 to Jan 1.
+    - `last_n_days: N` is today plus the N−1 days before it.
+  - `day_range(date)` is the whole business day, used for date-only values.
+- **Every search is limited to the current year, even without a date filter (confirmed 2026-10-27).**
+  - Each `FieldRegistry` names a `current_year_scope_field`: `transaction_date` for transactions, `opened_at` for chargebacks.
+  - `SearchService` always ANDs `scope_field ∈ current_year_range()` onto the compiled filter.
+  - `GET /transactions/{id}` returns 404 for a transaction outside the current year.
+- **Current-year limit (confirmed 2026-10-27).** Only dates inside the current calendar year (America/New_York) can be searched. Anything outside is rejected with `DATE_OUT_OF_RANGE`; ranges are never silently clipped.
+  - `resolve()` rejects relative ranges that reach outside the year, e.g. `last_month` in January, or `last_n_days: 11` on Jan 10.
+  - `ensure_in_current_year(value)` rejects explicit dates and date-times outside the year.
+  - The validator (P1a-5) calls both and turns `DateOutsideAllowedRangeError` into a `DATE_OUT_OF_RANGE` issue.
 
 ### 3.5 Generic search (`searchable_repository.py`, `search_service.py`)
 ```python
@@ -605,25 +670,25 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 ### Phase 0 — Foundation
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
-| P0-1 | Initialize uv workspace, `shared` package, ruff/mypy/pytest config, Makefile | S | — | `make lint test` passes on an empty skeleton |
-| P0-2 | docker-compose: postgres, redis, chroma (P2 services present but optional), healthchecks | S | P0-1 | `make up` brings all services up healthy |
-| P0-3 | `shared/config` settings classes + `.env.example` | S | P0-1 | Each service loads typed settings. A missing required var fails fast |
-| P0-4 | ORM models + Alembic initial migration (5 tables, constraints, indexes) | M | P0-2 | `make migrate` creates the schema. UNIQUE constraints enforce the 1:1 relationships |
-| P0-5 | `database/initdb` roles script: `app_owner`, `app_readonly`, read-only defaults, statement timeout | S | P0-4 | `INSERT` as `app_readonly` fails. `SELECT` works |
-| P0-6 | Seed script (deterministic, distributions per §2.3) | M | P0-4 | `make seed` gives 100 transactions, matching payments, refunds about 20%, chargebacks about 15% with events. Re-running produces the same data |
+| P0-1 | Initialize uv workspace, `shared` package, ruff/mypy/pytest config, Makefile | S | — | `make lint test` passes on an empty skeleton ✅ |
+| P0-2 | docker-compose: postgres, redis, chroma (P2 services present but optional), healthchecks | S | P0-1 | `make up` brings all services up healthy ✅ |
+| P0-3 | `shared/config` settings classes + `.env.example` | S | P0-1 | Each service loads typed settings. A missing required var fails fast ✅ |
+| P0-4 | ORM models + Alembic initial migration (5 tables, constraints, indexes) | M | P0-2 | `make migrate` creates the schema. UNIQUE constraints enforce the 1:1 relationships ✅ |
+| P0-5 | `database/initdb` roles script: `app_owner`, `app_readonly`, read-only defaults, statement timeout | S | P0-4 | `INSERT` as `app_readonly` fails. `SELECT` works ✅ |
+| P0-6 | Seed script (deterministic, distributions per §2.3) | M | P0-4 | `make seed` gives 100 transactions, matching payments, refunds about 20%, chargebacks about 15% with events. Re-running produces the same data ✅ |
 
 ### Phase 1a — Transaction Service
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
-| P1a-1 | Shared contracts: `FilterNode`, `SearchRequest`, `PaginatedResult`, `FilterValidationIssue` | S | P0-1 | JSON schema generated. Unknown keys rejected |
-| P1a-2 | `FieldType` coercers + `Operator` enum | S | P1a-1 | Unit tests per type (decimal, timestamp, enum, uuid, bool) |
-| P1a-3 | `FilterableField`, `FieldRegistry` (+ suggestions) and the transaction / chargeback registries, including JSON-path fields | M | P1a-2 | Registries list every field in §3.2. `suggest_similar("cust_id")` → `customer_id` |
-| P1a-4 | `RelativeDateResolver` with injected clock | S | P1a-1 | `this_month` / `last_month` / `last_n_days` correct across month and DST boundaries in ET |
-| P1a-5 | `FilterValidator` (tree walk, depth and count limits, all issue codes) | M | P1a-3 | Every issue code covered. All issues returned in one pass, with the right path |
+| P1a-1 | Shared contracts: `FilterNode`, `SearchRequest`, `PaginatedResult`, `FilterValidationIssue`, plus shape limits (depth, count, field-name pattern) | S | P0-1 | JSON schema generated. Unknown keys rejected ✅ |
+| P1a-2 | `FieldType` coercers (`Operator` enum is in the shared contract) | S | P1a-1 | Unit tests per type (decimal, timestamp, enum, uuid, bool) ✅ |
+| P1a-3 | `FilterableField`, `FieldRegistry` (+ suggestions) and the transaction / chargeback registries, including JSON-path fields | M | P1a-2 | Registries list every field in §3.2. `suggest_similar("cust_id")` → `customer_id` ✅ |
+| P1a-4 | `BusinessCalendar` with injected clock + current-year limit | S | P1a-1 | `this_month` / `last_month` / `last_n_days` correct across month and DST boundaries in ET. Dates outside the current year rejected ✅ |
+| P1a-5 | `FilterValidator` (tree walk against the registry, all issue codes) → resolved tree | M | P1a-3 | Every issue code covered. All issues returned in one pass, with the right path ✅ |
 | P1a-6 | `FilterCompiler` (operator map, AND/OR/NOT, 1:1 joins, 1:n EXISTS) | L | P1a-3, P1a-4 | SQL snapshot tests. No string interpolation of values. OR + NOT + nested compile correctly |
 | P1a-7 | Read-only async DB session factory | S | P0-5 | Sessions use `app_readonly`. An attempted write raises |
 | P1a-8 | `SearchableRepository` + transaction/chargeback repositories (count + page, stable sort) | M | P1a-6, P1a-7 | Correct `total_count` with 1:n filters (no duplicates) |
-| P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate) | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence |
+| P1a-9 | `SearchService` + `TransactionDetailService` (full aggregate), both limited to the current year | M | P1a-5, P1a-8 | Detail includes payment, refunds[], chargeback, events[] ordered by sequence. A search without a date filter and a detail lookup never return rows outside the current year |
 | P1a-10 | Routes, 422/404 error mapping, bearer auth, `/health` | M | P1a-9 | OpenAPI docs render. Validation errors return the issue list |
 | P1a-11 | Integration tests for UC1–UC5 + OR/NOT cases | M | P1a-10, P0-6 | All pass against seeded Postgres |
 | P1a-12 | Security test suite (injection, sort-field abuse, oversized filters) | M | P1a-10 | All payloads rejected or bound. DB unchanged |

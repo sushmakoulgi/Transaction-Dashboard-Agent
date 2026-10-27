@@ -1,0 +1,17 @@
+[project]
+name = "transaction-service"
+version = "0.1.0"
+description = "Read-only REST API for searching transactions and chargebacks with safe dynamic filters."
+requires-python = ">=3.12"
+dependencies = [
+    "shared",
+    "transaction-database",
+]
+
+[tool.uv.sources]
+shared = { workspace = true }
+transaction-database = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

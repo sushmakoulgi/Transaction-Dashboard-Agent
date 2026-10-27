@@ -11,6 +11,7 @@ members = [
     "shared",
     "transaction-dashboard",
     "transaction-database",
+    "transaction-service",
 ]
 
 [[package]]
@@ -805,6 +806,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "shared" },
     { name = "transaction-database" },
+    { name = "transaction-service" },
 ]
 
 [package.dev-dependencies]
@@ -819,6 +821,7 @@ dev = [
 requires-dist = [
     { name = "shared", editable = "packages/shared" },
     { name = "transaction-database", editable = "packages/transaction_database" },
+    { name = "transaction-service", editable = "services/transaction_service" },
 ]
 
 [package.metadata.requires-dev]
@@ -846,6 +849,21 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "shared", editable = "packages/shared" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
+]
+
+[[package]]
+name = "transaction-service"
+version = "0.1.0"
+source = { editable = "services/transaction_service" }
+dependencies = [
+    { name = "shared" },
+    { name = "transaction-database" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "shared", editable = "packages/shared" },
+    { name = "transaction-database", editable = "packages/transaction_database" },
 ]
 
 [[package]]

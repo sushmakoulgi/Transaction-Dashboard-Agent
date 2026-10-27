@@ -6,17 +6,19 @@ requires-python = ">=3.12"
 dependencies = [
     "shared",
     "transaction-database",
+    "transaction-service",
 ]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "services/*"]
 
 [tool.uv.sources]
 shared = { workspace = true }
 transaction-database = { workspace = true }
+transaction-service = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -38,7 +40,13 @@ select = ["E", "F", "I", "B", "UP", "SIM", "N", "RUF"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-packages = ["shared", "transaction_database"]
+packages = ["shared", "transaction_database", "transaction_service"]
+
+[tool.pyright]
+# Lets Pylance / Pyright in the editor use the project's virtual environment.
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -46,4 +54,4 @@ asyncio_mode = "auto"
 markers = ["integration: needs the docker-compose Postgres (make up migrate)"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["shared", "transaction_database"]
+known-first-party = ["shared", "transaction_database", "transaction_service"]

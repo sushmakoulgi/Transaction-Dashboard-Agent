@@ -9,6 +9,15 @@ class TransactionType(StrEnum):
     TOP_UP = "TOP_UP"
 
 
+class MerchantCategory(StrEnum):
+    ELECTRONICS = "ELECTRONICS"
+    TRAVEL = "TRAVEL"
+    GROCERY = "GROCERY"
+    DIGITAL_GOODS = "DIGITAL_GOODS"
+    APPAREL = "APPAREL"
+    HOME = "HOME"
+
+
 class PaymentMethod(StrEnum):
     CARD = "CARD"
     WALLET = "WALLET"

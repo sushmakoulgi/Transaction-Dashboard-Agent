@@ -134,3 +134,39 @@ def test_each_chargeback_has_one_to_four_ordered_events_starting_with_opened(
 def test_rejects_naive_reference_time() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         SampleDataGenerator(datetime(2026, 10, 27), BUSINESS_TIMEZONE, random_seed=1)
+
+
+def all_timestamps(dataset: SampleDataset) -> list[datetime]:
+    return [
+        value
+        for rows in dataset.rows_by_table_name().values()
+        for row in rows
+        for value in row.values()
+        if isinstance(value, datetime)
+    ]
+
+
+@pytest.mark.parametrize(
+    "reference_time",
+    [
+        datetime(2026, 1, 10, 17, tzinfo=UTC),
+        datetime(2026, 2, 15, 17, tzinfo=UTC),
+        # 03:00 UTC on Jan 1 2027 is still Dec 31 2026 in New York.
+        datetime(2027, 1, 1, 3, tzinfo=UTC),
+    ],
+)
+def test_every_timestamp_stays_inside_the_current_business_year(reference_time: datetime) -> None:
+    dataset = SampleDataGenerator(reference_time, BUSINESS_TIMEZONE, random_seed=7).generate()
+    business_year = reference_time.astimezone(BUSINESS_TIMEZONE).year
+    year_start = datetime(business_year, 1, 1, tzinfo=BUSINESS_TIMEZONE)
+    assert all(year_start <= moment <= reference_time for moment in all_timestamps(dataset))
+
+
+def test_january_seed_puts_every_transaction_in_the_current_month() -> None:
+    dataset = SampleDataGenerator(
+        datetime(2026, 1, 10, 17, tzinfo=UTC), BUSINESS_TIMEZONE, random_seed=7
+    ).generate()
+    january_start = datetime(2026, 1, 1, tzinfo=BUSINESS_TIMEZONE)
+    assert len(dataset.transactions) == 100
+    assert all(row["transaction_date"] >= january_start for row in dataset.transactions)
+    assert len(dataset.chargebacks) == 15

@@ -16,6 +16,7 @@ from transaction_database.enums import (
     CardBrand,
     ChargebackEventType,
     ChargebackStatus,
+    MerchantCategory,
     PaymentMethod,
     PaymentStatus,
     RefundStatus,
@@ -59,37 +60,37 @@ MERCHANTS: tuple[Row, ...] = (
     {
         "merchant_id": "M-001",
         "merchant_name": "Northwind Electronics",
-        "merchant_category": "ELECTRONICS",
+        "merchant_category": MerchantCategory.ELECTRONICS.value,
         "country": "US",
     },
     {
         "merchant_id": "M-002",
         "merchant_name": "Blue Harbor Travel",
-        "merchant_category": "TRAVEL",
+        "merchant_category": MerchantCategory.TRAVEL.value,
         "country": "US",
     },
     {
         "merchant_id": "M-003",
         "merchant_name": "Greenleaf Grocers",
-        "merchant_category": "GROCERY",
+        "merchant_category": MerchantCategory.GROCERY.value,
         "country": "US",
     },
     {
         "merchant_id": "M-004",
         "merchant_name": "Streamline Media",
-        "merchant_category": "DIGITAL_GOODS",
+        "merchant_category": MerchantCategory.DIGITAL_GOODS.value,
         "country": "GB",
     },
     {
         "merchant_id": "M-005",
         "merchant_name": "Atlas Outfitters",
-        "merchant_category": "APPAREL",
+        "merchant_category": MerchantCategory.APPAREL.value,
         "country": "CA",
     },
     {
         "merchant_id": "M-006",
         "merchant_name": "Lumen Home Goods",
-        "merchant_category": "HOME",
+        "merchant_category": MerchantCategory.HOME.value,
         "country": "DE",
     },
 )
@@ -165,12 +166,16 @@ class SampleDataGenerator:
         self._random = random.Random(random_seed)
         self._profile = profile or SampleDataProfile()
         self._reference_time = reference_time.astimezone(UTC)
-        self._current_month_start = (
-            reference_time.astimezone(business_timezone)
-            .replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            .astimezone(UTC)
+        local_month_start = reference_time.astimezone(business_timezone).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
         )
-        self._history_start = self._reference_time - timedelta(days=self._profile.history_days)
+        self._current_month_start = local_month_start.astimezone(UTC)
+        # Only the current year is searchable, so history never reaches before Jan 1.
+        current_year_start = local_month_start.replace(month=1).astimezone(UTC)
+        self._history_start = max(
+            self._reference_time - timedelta(days=self._profile.history_days), current_year_start
+        )
+        self._has_earlier_months = self._history_start < self._current_month_start
 
     def generate(self) -> SampleDataset:
         dataset = SampleDataset()
@@ -183,7 +188,10 @@ class SampleDataGenerator:
         return dataset
 
     def _build_transaction(self) -> Row:
-        is_in_current_month = self._random.random() < self._profile.current_month_transaction_share
+        is_in_current_month = (
+            self._random.random() < self._profile.current_month_transaction_share
+            or not self._has_earlier_months
+        )
         if is_in_current_month:
             transaction_date = self._random_time_between(
                 self._current_month_start, self._reference_time
