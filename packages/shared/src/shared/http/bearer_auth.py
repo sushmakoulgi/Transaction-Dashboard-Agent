@@ -1,13 +1,16 @@
 """Static bearer-token authentication for service-to-service calls.
 
 `require_bearer_token` protects FastAPI routes; `BearerTokenMiddleware` protects any ASGI app
-(such as the MCP server). Both compare tokens in constant time.
+(such as the MCP server). Both compare tokens in constant time. `bearer_token_dependencies`
+and `protect_with_bearer_token` apply them only while AUTH_ENABLED is true.
 """
 
 import hmac
+import logging
 from collections.abc import Callable, Collection
 
 from fastapi import Depends, HTTPException, status
+from fastapi.params import Depends as DependsParam
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import SecretStr
 from starlette.responses import JSONResponse
@@ -15,8 +18,11 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from shared.contracts import ErrorResponse
 
+logger = logging.getLogger(__name__)
+
 bearer_scheme = HTTPBearer(auto_error=False)
 UNAUTHORIZED_MESSAGE = "missing or invalid bearer token"
+AUTH_DISABLED_WARNING = "AUTH_ENABLED is false: %s accepts requests without a bearer token"
 
 
 def tokens_match(presented_token: str | None, expected_token: SecretStr) -> bool:
@@ -73,3 +79,31 @@ class BearerTokenMiddleware:
             headers={"WWW-Authenticate": "Bearer"},
         )
         await response(scope, receive, send)
+
+
+def bearer_token_dependencies(
+    auth_enabled: bool, expected_token: SecretStr | None, service_name: str
+) -> list[DependsParam]:
+    """Route dependencies for FastAPI: the token check, or nothing when auth is disabled."""
+    if not auth_enabled:
+        logger.warning(AUTH_DISABLED_WARNING, service_name)
+        return []
+    if expected_token is None:
+        raise ValueError(f"{service_name}: a bearer token is required while auth is enabled")
+    return [Depends(require_bearer_token(expected_token))]
+
+
+def protect_with_bearer_token(
+    app: ASGIApp,
+    auth_enabled: bool,
+    expected_token: SecretStr | None,
+    service_name: str,
+    exempt_paths: Collection[str] = (),
+) -> ASGIApp:
+    """Wraps an ASGI app in `BearerTokenMiddleware`, unless auth is disabled."""
+    if not auth_enabled:
+        logger.warning(AUTH_DISABLED_WARNING, service_name)
+        return app
+    if expected_token is None:
+        raise ValueError(f"{service_name}: a bearer token is required while auth is enabled")
+    return BearerTokenMiddleware(app, expected_token, exempt_paths)

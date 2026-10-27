@@ -453,6 +453,11 @@ class SearchableRepository[ItemT]:
 - **Startup:** the lifespan builds `ReadOnlyDatabase`, runs `ensure_cannot_write()` (refusing to start with a writable account), then wires the services into a `ServiceContainer` on `app.state`.
 - **Read-only surface:** only GET and POST exist, and POST only on the two searches and validate. A test reads `/openapi.json` to check this, and DELETE returns 405.
 - **Auth:** every `/api/v1` route requires `Authorization: Bearer $TRANSACTION_SERVICE_API_TOKEN` (at least 16 characters, compared in constant time). Failures return 401 with `WWW-Authenticate: Bearer`.
+- **`AUTH_ENABLED` (default `true`) applies to every service.**
+  - **`true`:** the Transaction Service (`/api/v1`) and the MCP server (`/mcp`) require their bearer tokens. A missing token fails at startup (`AuthenticatedServiceSettings.ensure_api_token`).
+  - **`false`:** no token is checked, tokens may be left empty, and each service logs `AUTH_ENABLED is false: <service> accepts requests without a bearer token` at startup. Use it for local testing only.
+  - `bearer_token_dependencies()` (FastAPI) and `protect_with_bearer_token()` (ASGI) in `shared/http/bearer_auth.py` apply the check only while it is enabled.
+  - `TransactionServiceClient` sends `Authorization` only when a token is configured.
 - **Errors all use `ErrorResponse {error, message, issues[]}`:**
 
 | Status | `error` | When |

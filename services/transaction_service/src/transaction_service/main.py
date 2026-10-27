@@ -7,14 +7,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from shared.clock import Clock, SystemClock
 from shared.contracts import HealthStatus
-from shared.http.bearer_auth import require_bearer_token
+from shared.http.bearer_auth import bearer_token_dependencies
 from transaction_service.api.dependencies import ServiceContainer, get_services
 from transaction_service.api.error_handlers import register_error_handlers
 from transaction_service.api.routes import router
@@ -71,9 +71,11 @@ def create_app(
     register_error_handlers(app)
     app.include_router(
         router,
-        dependencies=[
-            Depends(require_bearer_token(service_settings.transaction_service_api_token))
-        ],
+        dependencies=bearer_token_dependencies(
+            service_settings.auth_enabled,
+            service_settings.transaction_service_api_token,
+            "Transaction Service",
+        ),
     )
 
     @app.get("/health", response_model=HealthStatus, tags=["health"])

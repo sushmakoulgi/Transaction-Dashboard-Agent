@@ -11,10 +11,12 @@ API_TOKEN = "test-token-0123456789abcdef"
 AUTHORIZED = {"Authorization": f"Bearer {API_TOKEN}"}
 
 
-def settings_for(database_url: str) -> TransactionServiceSettings:
+def settings_for(database_url: str, auth_enabled: bool = True) -> TransactionServiceSettings:
+    """Explicit settings, so a local AUTH_ENABLED in .env can't change the tests."""
     return TransactionServiceSettings(
         postgres_dsn_readonly=database_url,  # type: ignore[arg-type]
-        transaction_service_api_token=SecretStr(API_TOKEN),
+        auth_enabled=auth_enabled,
+        transaction_service_api_token=SecretStr(API_TOKEN) if auth_enabled else None,
     )
 
 

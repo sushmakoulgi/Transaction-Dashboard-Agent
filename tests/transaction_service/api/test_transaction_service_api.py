@@ -11,11 +11,13 @@ import httpx
 import pytest
 from api_test_helpers import API_TOKEN, AUTHORIZED, post_search, settings_for
 from filter_test_helpers import condition, group
+from pydantic import SecretStr
 from sqlalchemy.exc import OperationalError
 
 from shared.config import DatabaseSettings
 from transaction_service.main import create_app
 from transaction_service.persistence.database import WritableDatabaseAccountError
+from transaction_service.settings import TransactionServiceSettings
 
 pytestmark = pytest.mark.integration
 
@@ -192,3 +194,41 @@ async def test_validate_filters(client: httpx.AsyncClient) -> None:
     body = invalid.json()
     assert body["is_valid"] is False
     assert body["issues"][0]["code"] == "DATE_OUT_OF_RANGE"
+
+
+# --- AUTH_ENABLED=false ---
+
+
+async def test_without_auth_the_api_needs_no_token() -> None:
+    app = create_app(
+        settings_for(str(DatabaseSettings().postgres_dsn_readonly), auth_enabled=False)
+    )
+    try:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://transaction-service"
+            ) as client,
+        ):
+            response = await client.post("/api/v1/transactions/search", json={})
+    except OperationalError as error:
+        pytest.skip(f"Postgres is not reachable: {error.orig}")
+    assert response.status_code == 200
+    assert response.json()["total_count"] == 100
+
+
+def test_settings_need_the_token_only_while_auth_is_enabled() -> None:
+    database_url = str(DatabaseSettings().postgres_dsn_readonly)
+    with pytest.raises(ValueError, match="TRANSACTION_SERVICE_API_TOKEN is required"):
+        TransactionServiceSettings(
+            postgres_dsn_readonly=database_url,  # type: ignore[arg-type]
+            auth_enabled=True,
+            transaction_service_api_token=None,
+        )
+    with pytest.raises(ValueError, match="at least 16"):
+        TransactionServiceSettings(
+            postgres_dsn_readonly=database_url,  # type: ignore[arg-type]
+            auth_enabled=True,
+            transaction_service_api_token=SecretStr("short"),
+        )
+    settings_for(database_url, auth_enabled=False)  # no token needed

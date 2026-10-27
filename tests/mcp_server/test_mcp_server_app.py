@@ -4,6 +4,7 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 import httpx
 import httpx2
@@ -25,12 +26,21 @@ def free_local_port() -> int:
         return int(probe.getsockname()[1])
 
 
-@pytest.fixture(scope="module")
-def server_url() -> Iterator[str]:
-    settings = McpServerSettings(
+def mcp_settings(auth_enabled: bool) -> McpServerSettings:
+    """Explicit settings, so a local AUTH_ENABLED in .env can't change the tests."""
+    if not auth_enabled:
+        return McpServerSettings(
+            auth_enabled=False, mcp_api_token=None, transaction_service_api_token=None
+        )
+    return McpServerSettings(
+        auth_enabled=True,
         mcp_api_token=SecretStr(MCP_TOKEN),
         transaction_service_api_token=SecretStr("unused-in-these-tests-0123"),
     )
+
+
+@contextmanager
+def running_server(settings: McpServerSettings) -> Iterator[str]:
     port = free_local_port()
     server = uvicorn.Server(
         uvicorn.Config(create_app(settings), host="127.0.0.1", port=port, log_level="warning")
@@ -42,9 +52,23 @@ def server_url() -> Iterator[str]:
         if time.monotonic() > deadline:
             raise RuntimeError("MCP server did not start")
         time.sleep(0.05)
-    yield f"http://127.0.0.1:{port}"
-    server.should_exit = True
-    thread.join(timeout=10)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+@pytest.fixture(scope="module")
+def server_url() -> Iterator[str]:
+    with running_server(mcp_settings(auth_enabled=True)) as url:
+        yield url
+
+
+@pytest.fixture(scope="module")
+def server_url_without_auth() -> Iterator[str]:
+    with running_server(mcp_settings(auth_enabled=False)) as url:
+        yield url
 
 
 def mcp_client(server_url: str, token: str = MCP_TOKEN) -> Client:
@@ -95,3 +119,24 @@ async def test_real_mcp_client_with_a_wrong_token_cannot_connect(server_url: str
             await client.list_tools()
     mcp_errors, _ = error.value.split(MCPError)
     assert mcp_errors is not None
+
+
+# --- AUTH_ENABLED=false ---
+
+
+async def test_without_auth_any_client_can_call_tools(server_url_without_auth: str) -> None:
+    response = httpx.post(f"{server_url_without_auth}/mcp", json={})
+    assert response.status_code != 401
+    async with Client(streamable_http_client(f"{server_url_without_auth}/mcp")) as client:
+        result = await client.call_tool("ping")
+    assert result.content[0].text == "pong"  # type: ignore[union-attr]
+
+
+def test_mcp_settings_need_tokens_only_while_auth_is_enabled() -> None:
+    with pytest.raises(ValueError, match="MCP_API_TOKEN is required"):
+        McpServerSettings(
+            auth_enabled=True,
+            mcp_api_token=None,
+            transaction_service_api_token=SecretStr("x" * 16),
+        )
+    mcp_settings(auth_enabled=False)  # no tokens needed

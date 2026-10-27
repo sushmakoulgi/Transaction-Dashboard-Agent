@@ -56,7 +56,7 @@ class TransactionServiceClient:
     def __init__(
         self,
         base_url: str,
-        api_token: SecretStr,
+        api_token: SecretStr | None,
         timeout_seconds: float = 10.0,
         max_retries: int = 2,
         retry_backoff_seconds: float = 0.2,
@@ -64,7 +64,11 @@ class TransactionServiceClient:
     ) -> None:
         self._http_client = httpx.AsyncClient(
             base_url=base_url.rstrip("/") + "/api/v1",
-            headers={"Authorization": f"Bearer {api_token.get_secret_value()}"},
+            headers=(
+                {"Authorization": f"Bearer {api_token.get_secret_value()}"}
+                if api_token is not None
+                else {}
+            ),
             timeout=timeout_seconds,
             transport=transport,
         )

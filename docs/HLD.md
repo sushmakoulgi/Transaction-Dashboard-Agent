@@ -226,7 +226,7 @@ erDiagram
 | 4. SQL | SQLAlchemy Core expressions with bound parameters only. No `text()` built from input |
 | 5. Database | `app_readonly` role with `SELECT` grants only. `default_transaction_read_only = on`. `statement_timeout = 5s` |
 | 6. Resource limits | `page_size ≤ 100`. Sorting only on whitelisted fields. Agent loop limited to a maximum number of iterations |
-| 7. Transport | MCP server and Transaction Service require a bearer token. Secrets only in `.env`, which git ignores |
+| 7. Transport | MCP server and Transaction Service require a bearer token while `AUTH_ENABLED=true` (the default). `AUTH_ENABLED=false` turns the check off everywhere for local testing and logs a warning. Secrets only in `.env`, which git ignores |
 | 8. Validation loop | The LLM gets precise validation errors and fixes the query itself (R6). The validator always decides; the LLM is never the security boundary |
 
 ## 8. Technology choices

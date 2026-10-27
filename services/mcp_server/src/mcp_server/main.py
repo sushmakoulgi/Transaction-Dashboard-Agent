@@ -1,7 +1,8 @@
 """MCP server exposing the Transaction Service as tools over Streamable HTTP.
 
 Run with: uvicorn mcp_server.main:create_app --factory --port 8100
-Clients connect to http://localhost:8100/mcp with `Authorization: Bearer $MCP_API_TOKEN`.
+Clients connect to http://localhost:8100/mcp with `Authorization: Bearer $MCP_API_TOKEN`
+(not needed when AUTH_ENABLED is false).
 
 The server is stateless and answers in JSON: every tool call is a self-contained
 request/response, so no session state is kept between calls.
@@ -19,7 +20,7 @@ from starlette.types import ASGIApp
 from mcp_server.settings import McpServerSettings
 from shared.clients.transaction_service_client import TransactionServiceClient
 from shared.contracts import HealthStatus
-from shared.http.bearer_auth import BearerTokenMiddleware
+from shared.http.bearer_auth import protect_with_bearer_token
 
 MCP_PATH = "/mcp"
 HEALTH_PATH = "/health"
@@ -71,4 +72,10 @@ def create_app(settings: McpServerSettings | None = None) -> ASGIApp:
     mcp_app = create_mcp_server(server_settings).streamable_http_app(
         streamable_http_path=MCP_PATH, stateless_http=True, json_response=True
     )
-    return BearerTokenMiddleware(mcp_app, server_settings.mcp_api_token, exempt_paths={HEALTH_PATH})
+    return protect_with_bearer_token(
+        mcp_app,
+        server_settings.auth_enabled,
+        server_settings.mcp_api_token,
+        "MCP server",
+        exempt_paths={HEALTH_PATH},
+    )

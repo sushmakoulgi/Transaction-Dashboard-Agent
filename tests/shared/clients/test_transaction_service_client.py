@@ -169,3 +169,12 @@ async def test_error_without_the_standard_body() -> None:
     assert (error.value.status_code, error.value.error) == (500, "HTTP_ERROR")
     assert error.value.message == "Internal Server Error"
     assert len(transport.requests) == 1
+
+
+async def test_sends_no_authorization_header_without_a_token() -> None:
+    transport = RecordingTransport(json_response(200, EMPTY_PAGE))
+    async with TransactionServiceClient(
+        "http://transaction-service:8200", None, transport=transport
+    ) as client:
+        await client.search_transactions(SearchRequest())
+    assert "authorization" not in transport.requests[0].headers
