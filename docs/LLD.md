@@ -83,8 +83,8 @@ Transaction_Dashboard/
 │       │   ├── claude_client.py      # ClaudeClient: model/effort/fallbacks, stop reasons, typed errors
 │       │   └── system_prompt.py
 │       ├── mcp_bridge/
-│       │   ├── mcp_tool_gateway.py   # connect, list_tools, call_tool
-│       │   └── tool_definition_mapper.py  # MCP Tool → Anthropic tool param
+│       │   ├── mcp_tool_gateway.py   # McpToolGateway: connect once, cached tools, call_tool → ToolCallOutcome
+│       │   └── tool_definition_mapper.py  # MCP Tool → Anthropic tool (sorted, no `discriminator`)
 │       ├── memory/
 │       │   ├── session_store.py      # SessionStore Protocol
 │       │   └── in_memory_session_store.py
@@ -634,8 +634,19 @@ class SessionStore(Protocol):
 - The UI keeps its own on-screen transcript (questions and replies) in browser state for display. The server never stores it.
 
 ### 6.5 MCP bridge (`mcp_bridge/`)
-- `McpToolGateway` opens a Streamable HTTP client session to `MCP_SERVER_URL` with the bearer token at startup (FastAPI lifespan). It caches `list_tools()` and exposes `call_tool(name, args)`.
-- `ToolDefinitionMapper` converts an MCP `Tool` to `{name, description, input_schema}` for the Anthropic API. The tool list is sorted, so the prompt prefix stays identical and cacheable.
+- **`McpToolGateway`** (`mcp_tool_gateway.py`) is opened once with `async with`, in the agent's lifespan. The MCP client's task group must be entered and exited in the same task.
+  - `connect_to(MCP_SERVER_URL, MCP_API_TOKEN)` builds an `httpx2` client, adding the Bearer header only when a token is configured, and the SDK's `streamable_http_client`.
+  - **Startup:** it connects and runs `list_tools()` once. On any failure (unreachable server, wrong token) it raises one clear `McpServerUnavailableError` naming the cause, instead of the SDK's nested exception groups.
+  - **`tool_definitions`** are the Anthropic tool definitions, sorted by name.
+  - **`call_tool(name, arguments) -> ToolCallOutcome(is_error, text, structured_content)`** never raises for tool or transport failures; Claude gets them as error results. It rejects names that are not in the discovered list without calling the server, and returns tool errors (e.g. the JSON `ErrorResponse`) and transport failures as `is_error=True`.
+  - A per-call timeout comes from `MCP_TOOL_CALL_TIMEOUT_SECONDS` (default 30 s).
+- **`ToolDefinitionMapper`** (`tool_definition_mapper.py`) maps each MCP `Tool` to `{name, description (or title, or name), input_schema}`, sorted by name. The tool list is then byte-identical between requests, which prompt caching needs.
+  - It deep-copies each schema without pydantic's OpenAPI-only `discriminator` keyword. The `oneOf` alternatives (each with a fixed `kind`) keep the same meaning.
+- **`McpConnectionSettings`** holds `MCP_SERVER_URL` (default `http://localhost:8100/mcp`) and `MCP_API_TOKEN` (required while `AUTH_ENABLED`).
+- **Tests:**
+  - The mapper is tested on the real MCP server's listing (sorted, stable between listings, recursive filter schema kept, no `discriminator`).
+  - The gateway is tested against an in-memory test MCP server (success with structured content, tool error, unknown tool, invalid arguments, not connected, unreachable server).
+  - End to end over real HTTP, with both servers under uvicorn: the 5 tools are discovered, a search goes through the whole chain, validation problems come back, and a wrong token fails at startup.
 
 ### 6.6 Plan executor (`plan_execution/plan_executor.py`)
 - `PlanExecutor.execute(plan, page, page_size)` runs the steps in order against the Transaction Service over HTTP (through the shared `TransactionServiceClient`). Page and page_size are applied to the last search step.
@@ -805,7 +816,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
 | P1c-1 | `ClaudeClient` (model/effort config, adaptive thinking, fallbacks, stop-reason handling, typed error handling) | M | P0-3 | Unit tests with stubbed SDK cover refusal, max_tokens and rate-limit paths ✅ |
-| P1c-2 | `McpToolGateway` + `ToolDefinitionMapper` (lifespan connect, sorted tool list) | M | P1b-3 | Agent lists MCP tools at startup. Mapped schemas are accepted by the API |
+| P1c-2 | `McpToolGateway` + `ToolDefinitionMapper` (lifespan connect, sorted tool list) | M | P1b-3 | Agent lists MCP tools at startup. Mapped schemas are accepted by the API ✅ |
 | P1c-3 | `SessionEntry`, `SessionStore` Protocol + `InMemorySessionStore` (question + plan only, last-N limit, idle TTL) | S | P0-1 | A test checks that no tool result, result row or reply is persisted after a turn. Expiry works |
 | P1c-4 | System prompt (stable prefix) + date as a mid-conversation system message | S | P1c-1 | Prompt-cache reads > 0 on the second turn |
 | P1c-5 | `QueryAgent` loop: parallel tool calls, compact tool results, error tool_results, max iterations | L | P1c-1..4 | Scripted tests: success, validation-retry, iteration cap |

@@ -1,29 +1,20 @@
 """The MCP server running under real uvicorn on a free local port, reached by a real MCP client."""
 
-import socket
-import threading
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 import httpx
 import httpx2
 import pytest
-import uvicorn
 from mcp import Client, MCPError
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import SecretStr
+from server_test_helpers import running_uvicorn
 
 from mcp_server.main import create_app
 from mcp_server.settings import McpServerSettings
 
 MCP_TOKEN = "mcp-test-token-0123456789abcdef"
-
-
-def free_local_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
 
 
 def mcp_settings(auth_enabled: bool) -> McpServerSettings:
@@ -41,22 +32,8 @@ def mcp_settings(auth_enabled: bool) -> McpServerSettings:
 
 @contextmanager
 def running_server(settings: McpServerSettings) -> Iterator[str]:
-    port = free_local_port()
-    server = uvicorn.Server(
-        uvicorn.Config(create_app(settings), host="127.0.0.1", port=port, log_level="warning")
-    )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 10
-    while not server.started:
-        if time.monotonic() > deadline:
-            raise RuntimeError("MCP server did not start")
-        time.sleep(0.05)
-    try:
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        thread.join(timeout=10)
+    with running_uvicorn(create_app(settings)) as url:
+        yield url
 
 
 @pytest.fixture(scope="module")
