@@ -103,13 +103,16 @@ def test_rejects_requests_for_a_foreign_host_name(server_url: str) -> None:
     assert response.status_code in (400, 403, 421)
 
 
-async def test_real_mcp_client_lists_and_calls_tools(server_url: str) -> None:
+async def test_real_mcp_client_lists_the_tools(server_url: str) -> None:
     async with mcp_client(server_url) as client:
         tools = await client.list_tools()
-        assert [tool.name for tool in tools.tools] == ["ping"]
-        result = await client.call_tool("ping")
-    assert result.is_error is False
-    assert result.content[0].text == "pong"  # type: ignore[union-attr]
+    assert {tool.name for tool in tools.tools} == {
+        "search_transactions",
+        "search_chargebacks",
+        "get_transaction_detail",
+        "list_filterable_fields",
+        "validate_filters",
+    }
 
 
 async def test_real_mcp_client_with_a_wrong_token_cannot_connect(server_url: str) -> None:
@@ -124,12 +127,12 @@ async def test_real_mcp_client_with_a_wrong_token_cannot_connect(server_url: str
 # --- AUTH_ENABLED=false ---
 
 
-async def test_without_auth_any_client_can_call_tools(server_url_without_auth: str) -> None:
+async def test_without_auth_any_client_can_list_tools(server_url_without_auth: str) -> None:
     response = httpx.post(f"{server_url_without_auth}/mcp", json={})
     assert response.status_code != 401
     async with Client(streamable_http_client(f"{server_url_without_auth}/mcp")) as client:
-        result = await client.call_tool("ping")
-    assert result.content[0].text == "pong"  # type: ignore[union-attr]
+        tools = await client.list_tools()
+    assert len(tools.tools) == 5
 
 
 def test_mcp_settings_need_tokens_only_while_auth_is_enabled() -> None:

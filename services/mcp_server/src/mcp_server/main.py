@@ -12,12 +12,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+import httpx
 from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
 from mcp_server.settings import McpServerSettings
+from mcp_server.tools import register_tools
 from shared.clients.transaction_service_client import TransactionServiceClient
 from shared.contracts import HealthStatus
 from shared.http.bearer_auth import protect_with_bearer_token
@@ -37,13 +39,19 @@ class McpServerResources:
     transaction_service: TransactionServiceClient
 
 
-def create_mcp_server(settings: McpServerSettings) -> MCPServer[McpServerResources]:
+def create_mcp_server(
+    settings: McpServerSettings,
+    transaction_service_transport: httpx.AsyncBaseTransport | None = None,
+) -> MCPServer[McpServerResources]:
+    """`transaction_service_transport` lets tests route calls to an in-process service."""
+
     @asynccontextmanager
     async def lifespan(_: MCPServer[McpServerResources]) -> AsyncIterator[McpServerResources]:
         async with TransactionServiceClient(
             str(settings.transaction_service_url),
             settings.transaction_service_api_token,
             timeout_seconds=settings.transaction_service_timeout_seconds,
+            transport=transaction_service_transport,
         ) as transaction_service:
             yield McpServerResources(transaction_service=transaction_service)
 
@@ -55,10 +63,7 @@ def create_mcp_server(settings: McpServerSettings) -> MCPServer[McpServerResourc
         lifespan=lifespan,
     )
 
-    # Placeholder until the real tools arrive in P1b-3.
-    @server.tool(description="Check that the MCP server is reachable. Returns 'pong'.")
-    def ping() -> str:
-        return "pong"
+    register_tools(server)
 
     @server.custom_route(HEALTH_PATH, methods=["GET"])  # type: ignore[untyped-decorator]  # SDK
     async def health(_: Request) -> JSONResponse:

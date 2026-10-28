@@ -70,10 +70,8 @@ Transaction_Dashboard/
 │   ├── mcp_server/src/mcp_server/
 │   │   ├── main.py                   # create_app(): MCPServer (mcp 2.x), Streamable HTTP, auth, /health
 │   │   ├── settings.py               # McpServerSettings (MCP token, Transaction Service URL + token)
-│   │   └── tools/
-│   │       ├── search_tools.py
-│   │       ├── detail_tools.py
-│   │       └── metadata_tools.py
+│   │   ├── tools.py                  # the 5 read-only tools (thin adapters, ToolError on failure)
+│   │   └── tool_descriptions.py      # what Claude reads: filter language, dates, examples
 │   └── agent_service/src/agent_service/
 │       ├── main.py
 │       ├── api/
@@ -493,23 +491,34 @@ class SearchableRepository[ItemT]:
   - A foreign `Host` header is rejected.
 
 ### 5.1 Tools
-| Tool | Input | Maps to |
-|---|---|---|
-| `search_transactions` | `SearchRequest` | `POST /transactions/search` |
-| `search_chargebacks` | `SearchRequest` | `POST /chargebacks/search` |
-| `get_transaction_detail` | `{transaction_id}` | `GET /transactions/{id}` |
-| `list_filterable_fields` | `{entity}` | `GET /{entity}/filterable-fields` |
-| `validate_filters` | `{entity, request}` | `POST /{entity}/filters/validate` |
+| Tool | Input (flat parameters) | Structured output | Maps to |
+|---|---|---|---|
+| `search_transactions` | `filter?, sort?, page=1, page_size=25` | `PaginatedResult[TransactionSummary]` | `POST /transactions/search` |
+| `search_chargebacks` | `filter?, sort?, page=1, page_size=25` | `PaginatedResult[ChargebackSummary]` | `POST /chargebacks/search` |
+| `get_transaction_detail` | `transaction_id` | `TransactionDetail` | `GET /transactions/{id}` |
+| `list_filterable_fields` | `entity` | `{entity, fields[]}` | `GET /{entity}/filterable-fields` |
+| `validate_filters` | `entity, filter?, sort?, page, page_size` | `FilterValidationResult` | `POST /{entity}/filters/validate` |
 
-- Input schemas come from the shared Pydantic contracts, so the MCP server, the agent and the Transaction Service always use the same definitions.
-- Tool descriptions spell out the filter language, the relative-date values, and "call `list_filterable_fields` when unsure of a field name".
-- A 422 from the Transaction Service becomes an MCP tool error containing the issue list, so outside clients get the same chance to correct themselves.
+- **Parameters** are flat rather than one nested `request` object, which is easier for an LLM to fill. They are typed with the shared contracts (`FilterNode`, `SortSpec`), so the generated JSON schema is the recursive filter tree (a `oneOf` condition/group keyed on `kind`) with every limit (`page_size` 1–100, field-name pattern). The tool then builds the shared `SearchRequest`, which also enforces depth ≤ 3 and ≤ 20 conditions.
+- **Annotations:** every tool has `read_only_hint=True, idempotent_hint=True, open_world_hint=False`.
+- **Descriptions** (`tool_descriptions.py`) give Claude the filter language, operators, relative dates, the current-year rule, the same-row AND rule, negation semantics, worked examples per use case, and "call `list_filterable_fields` when unsure".
+- **Errors** are raised as `ToolError`. The tool result has `is_error=True`, and its text is the JSON `ErrorResponse` `{error, message, issues[]}`, which the SDK prefixes with `Error executing tool <name>: `:
+
+  | Error | When |
+  |---|---|
+  | `FILTER_VALIDATION_FAILED` | The Transaction Service's validator found problems; every issue keeps its path and suggestions |
+  | `INVALID_REQUEST` | The `SearchRequest` limits failed in the tool (e.g. nesting > 3) |
+  | `TRANSACTION_NOT_FOUND` | Unknown ID, or outside the current year |
+  | `TRANSACTION_SERVICE_UNAVAILABLE` | The service is unreachable after retries |
+
+  Arguments that break the JSON schema itself (e.g. `page_size` 1000) are rejected by the SDK before the tool runs.
+- **`validate_filters`** never raises for an invalid filter. It returns `is_valid=false` with the issues, including shape problems.
 - Auth: `Authorization: Bearer <MCP_API_TOKEN>` is checked by middleware. The token is shared by the agent and outside clients (single user).
 - **`TransactionServiceClient`** (`shared/clients/transaction_service_client.py`) is shared by the MCP server and the agent's `PlanExecutor`.
   - It is one `httpx.AsyncClient` with the bearer token, a 10 s timeout, and typed methods for every endpoint, returning the shared contract models.
   - **Retries:** every endpoint only reads data, so every call (including POST searches) is safe to retry. Retries happen on connection errors, timeouts and 502/503/504, up to 2 times with exponential backoff. 4xx and other 5xx responses are never retried.
   - **Errors:** `ErrorResponse` bodies become `TransactionServiceError(status_code, error, message, issues)`, so the MCP tools can hand Claude the exact problems. If the service stays unreachable, it raises `TransactionServiceUnavailableError`.
-  - `PaginatedResult` accepts its own serialized `total_pages` when read back, and rejects it if it doesn't match `total_count / page_size`.
+  - `PaginatedResult.total_pages` is a real field, derived from `total_count / page_size` and rejected if a supplied value doesn't match, rather than a computed property. Its JSON schema therefore matches the serialized data. MCP clients validate structured output against the tool's output schema, and a computed property made them reject `total_pages`.
 
 ## 6. Agent Service (`:8000`, prefix `/api`)
 
@@ -772,7 +781,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 |---|---|---|---|---|
 | P1b-1 | `TransactionServiceClient` (httpx, timeouts, retries, token) | S | P1a-10 | Unit tested with httpx's mock transport, plus against the real service in-process (now in `shared/clients`) ✅ |
 | P1b-2 | FastMCP app, Streamable HTTP transport, bearer-token middleware | S | P0-3 | Unauthenticated requests rejected ✅ |
-| P1b-3 | 5 tools with detailed descriptions; schemas from shared contracts; 422 → tool error with issues | M | P1b-1, P1b-2 | MCP Inspector lists the tools and runs each successfully |
+| P1b-3 | 5 tools with detailed descriptions; schemas from shared contracts; 422 → tool error with issues | M | P1b-1, P1b-2 | MCP Inspector lists the tools and runs each successfully ✅ |
 | P1b-4 | Contract tests + doc for connecting Claude Desktop / other clients | S | P1b-3 | README section verified with a real client |
 
 ### Phase 1c — Agent Service

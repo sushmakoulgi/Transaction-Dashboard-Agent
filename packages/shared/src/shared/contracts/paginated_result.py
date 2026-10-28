@@ -1,39 +1,38 @@
 import math
 from typing import Any
 
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, model_validator
 
 from shared.contracts.contract_model import ContractModel
 
 
 class PaginatedResult[ItemT](ContractModel):
+    """One page of results. `total_pages` is always derived from `total_count` / `page_size`.
+
+    It is a real field (not a computed property) so the JSON schema matches the serialized
+    data, e.g. for MCP tools that validate structured output against their output schema.
+    """
+
     items: list[ItemT]
     page: int = Field(ge=1)
     page_size: int = Field(ge=1)
     total_count: int = Field(ge=0)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def total_pages(self) -> int:
-        return math.ceil(self.total_count / self.page_size)
+    total_pages: int = Field(default=0, ge=0)  # always replaced by derive_total_pages
 
     @model_validator(mode="before")
     @classmethod
-    def accept_matching_total_pages(cls, data: Any) -> Any:
-        """Lets a serialized result (which includes `total_pages`) be read back."""
-        if not isinstance(data, dict) or "total_pages" not in data:
+    def derive_total_pages(cls, data: Any) -> Any:
+        """Fills in `total_pages`, rejecting a supplied value that doesn't match."""
+        if not isinstance(data, dict):
             return data
-        fields = dict(data)
-        received_total_pages = fields.pop("total_pages")
-        total_count, page_size = fields.get("total_count"), fields.get("page_size")
-        if (
-            isinstance(total_count, int)
-            and isinstance(page_size, int)
-            and page_size > 0
-            and received_total_pages != math.ceil(total_count / page_size)
-        ):
+        total_count, page_size = data.get("total_count"), data.get("page_size")
+        if not (isinstance(total_count, int) and isinstance(page_size, int) and page_size > 0):
+            return data  # the field validators report the bad input
+        expected_total_pages = math.ceil(total_count / page_size)
+        supplied = data.get("total_pages", expected_total_pages)
+        if supplied != expected_total_pages:
             raise ValueError(
-                f"total_pages {received_total_pages} does not match "
+                f"total_pages {supplied} does not match "
                 f"total_count {total_count} / page_size {page_size}"
             )
-        return fields
+        return {**data, "total_pages": expected_total_pages}
