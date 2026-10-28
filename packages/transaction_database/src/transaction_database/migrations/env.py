@@ -7,7 +7,8 @@ from shared.config import DatabaseSettings
 from transaction_database.orm_models import Base
 
 if context.config.config_file_name is not None:
-    fileConfig(context.config.config_file_name)
+    # Keep loggers that already exist (e.g. db-setup's own) instead of silencing them.
+    fileConfig(context.config.config_file_name, disable_existing_loggers=False)
 
 
 def owner_database_url() -> str:

@@ -1,12 +1,19 @@
 ALEMBIC := uv run alembic -c packages/transaction_database/alembic.ini
 
-.PHONY: install up up-phase2 down reset-db migrate seed run-transaction-service run-mcp-server run-agent-service ui-install ui-dev ui-test ui-api-types lint format test
+.PHONY: install up up-stack logs up-phase2 down reset-db migrate seed run-transaction-service run-mcp-server run-agent-service ui-install ui-dev ui-test ui-api-types lint format test
 
 install:
 	uv sync
 
 up:
 	docker compose up -d --wait postgres
+
+# The whole stack in containers (Postgres, setup, services, UI) at http://localhost:5173.
+up-stack:
+	docker compose up -d --build --wait
+
+logs:
+	docker compose logs -f --tail=100
 
 up-phase2:
 	docker compose --profile phase2 up -d --wait

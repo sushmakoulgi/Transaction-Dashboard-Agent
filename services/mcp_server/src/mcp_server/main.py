@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
@@ -75,7 +76,16 @@ def create_mcp_server(
 def create_app(settings: McpServerSettings | None = None) -> ASGIApp:
     server_settings = settings or McpServerSettings()  # values from the environment
     mcp_app = create_mcp_server(server_settings).streamable_http_app(
-        streamable_http_path=MCP_PATH, stateless_http=True, json_response=True
+        streamable_http_path=MCP_PATH,
+        stateless_http=True,
+        json_response=True,
+        # Always explicit: the SDK only turns this on by itself when bound to localhost, and
+        # a container binds to 0.0.0.0.
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=server_settings.mcp_allowed_hosts,
+            allowed_origins=server_settings.mcp_allowed_origins,
+        ),
     )
     return protect_with_bearer_token(
         mcp_app,

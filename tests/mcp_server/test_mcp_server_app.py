@@ -120,3 +120,37 @@ def test_mcp_settings_need_tokens_only_while_auth_is_enabled() -> None:
             transaction_service_api_token=SecretStr("x" * 16),
         )
     mcp_settings(auth_enabled=False)  # no tokens needed
+
+
+INITIALIZE_REQUEST = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "t", "version": "1"},
+    },
+}
+MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
+
+
+def test_dns_rebinding_protection_stays_on_with_configured_hosts() -> None:
+    settings = McpServerSettings(
+        auth_enabled=False,
+        mcp_api_token=None,
+        transaction_service_api_token=None,
+        mcp_allowed_hosts=["127.0.0.1:*", "mcp-server:*"],
+    )
+    with running_server(settings) as url:
+        container_name = httpx.post(
+            f"{url}/mcp",
+            json=INITIALIZE_REQUEST,
+            headers={**MCP_HEADERS, "Host": "mcp-server:8100"},
+        )
+        foreign = httpx.post(
+            f"{url}/mcp", json=INITIALIZE_REQUEST, headers={**MCP_HEADERS, "Host": "evil.example"}
+        )
+    assert container_name.status_code == 200
+    assert container_name.json()["result"]["serverInfo"]["name"] == "transaction-dashboard"
+    assert foreign.status_code in (400, 403, 421)

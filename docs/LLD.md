@@ -811,6 +811,29 @@ ui/
   - **Tests** (jsdom + Testing Library, fake `AgentApiClient` passed into `<App api>`) cover: example click answering with the results summary, Enter vs Shift+Enter, session continuation, the waiting state blocking sends, three error kinds with issues, the conversation surviving a remount (reload), new conversation, and the connection status.
 - **Verified:** with all three services and the Vite dev server running, the page is served, its config points at the agent, and a browser-origin request to the agent's `/health` and the `/api/chat` CORS preflight (with `Authorization`) are allowed.
 
+## 8a. Running the stack in Docker (`docker-compose.yml`, `make up-stack`)
+| Container | Image | Port | Waits for |
+|---|---|---|---|
+| `postgres` | `postgres:16.4-alpine` | 5432 | — |
+| `db-setup` (one-shot) | `transaction-dashboard-services:local` | — | postgres healthy |
+| `transaction-service` | same | 8200 | db-setup completed |
+| `mcp-server` | same | 8100 | transaction-service healthy |
+| `agent-service` | same | 8000 | mcp-server healthy |
+| `ui` | `transaction-dashboard-ui:local` (nginx) | 5173 → 80 | agent-service healthy |
+
+- **One Python image** (`services.Dockerfile`): `python:3.12-slim` with uv 0.13.5. `uv sync --frozen --no-dev` installs from the lockfile, with dependencies in their own layer before the sources. It runs as a non-root user (uid 10001). Each container picks its command; the services bind `0.0.0.0`.
+- **`db-setup`** runs `python -m transaction_database.setup`: Alembic `upgrade head` (always), then the sample data **only if `transactions` is empty**, so restarts never replace data (`make seed` still does, on purpose). It was verified on a fresh volume (seeded 100) and again on the second run (skipped).
+- **Configuration:** containers read `.env` (`env_file`), and compose overrides the localhost addresses with in-network names: the DSNs use `@postgres:5432`, `TRANSACTION_SERVICE_URL=http://transaction-service:8200`, `MCP_SERVER_URL=http://mcp-server:8100/mcp`. Host ports are configurable with `*_HOST_PORT`.
+- **MCP DNS-rebinding protection is always explicit.** The SDK enables it by itself only when bound to localhost, and a container binds `0.0.0.0`. `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` default to the localhost names; compose adds `mcp-server:*` so the agent can connect. A test checks that `mcp-server:8100` is accepted and `evil.example` is still rejected.
+- **UI image:** a `node:24-alpine` build stage, then `nginx:1.27-alpine` serving `dist/` (hashed assets cached as immutable, `index.html` revalidated, `/healthz`).
+  - `VITE_AGENT_API_URL` and `VITE_AGENT_API_TOKEN` (from `AGENT_API_TOKEN`) are **build arguments**, because Vite compiles them into the bundle.
+  - The agent's `CORS_ALLOWED_ORIGINS` follows `UI_HOST_PORT`.
+- **Health checks:** Python services call their `/health` with `urllib` (the slim image has no curl). The UI calls `wget http://127.0.0.1/healthz`; IPv4 is needed because nginx listens on `0.0.0.0` and `localhost` resolves to `::1` in Alpine.
+- **Fixed while doing this:**
+  - Alembic's `fileConfig` disabled existing loggers; it now uses `disable_existing_loggers=False`.
+  - `alembic.ini`'s WARNING root level hid setup messages, so the package logger is set to INFO.
+  - The setup logger is named explicitly, because under `python -m` `__name__` is `__main__`.
+
 ## 9. Configuration (`.env.example`)
 ```
 POSTGRES_DSN_READONLY=postgresql+asyncpg://app_readonly:***@postgres:5432/transactions
@@ -921,7 +944,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1d-1 | Vite + React + TS scaffold, API client, types mirroring contracts | S | P1c-7 | `npm run dev` connects to the agent ✅ |
 | P1d-2 | Chat panel (session in sessionStorage, loading/error states) | M | P1d-1 | Conversation persists across page reloads within the tab ✅ |
 | P1d-3 | Results table (column registry per entity) + pager via `/plans/execute` | M | P1d-1 | Paging makes no `/chat` call (checked in the network tab / tests) ✅ |
-| P1d-4 | docker-compose `ui` service + Playwright E2E for UC1–5 | M | P1d-2, P1d-3 | E2E passes locally |
+| P1d-4 | docker-compose `ui` service + Playwright E2E for UC1–5 | M | P1d-2, P1d-3 | E2E passes locally (docker-compose ✅; Playwright E2E to do) |
 
 ### Phase 2a — Plan RAG
 | ID | Task | Size | Depends | Acceptance |
