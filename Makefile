@@ -1,6 +1,6 @@
 ALEMBIC := uv run alembic -c packages/transaction_database/alembic.ini
 
-.PHONY: install up up-phase2 down reset-db migrate seed run-transaction-service run-mcp-server lint format test
+.PHONY: install up up-phase2 down reset-db migrate seed run-transaction-service run-mcp-server run-agent-service lint format test
 
 install:
 	uv sync
@@ -29,6 +29,9 @@ run-transaction-service:
 
 run-mcp-server:
 	uv run uvicorn mcp_server.main:create_app --factory --port 8100 --reload
+
+run-agent-service:
+	uv run uvicorn agent_service.main:create_app --factory --port 8000 --reload
 
 lint:
 	uv run ruff check .

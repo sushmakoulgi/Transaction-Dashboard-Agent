@@ -244,3 +244,18 @@ async def test_uses_api_version_2026_10_21_with_a_bearer_key() -> None:
 @pytest.mark.parametrize("blank_key", ["", "   "])
 def test_blank_api_key_lets_the_sdk_resolve_credentials(blank_key: str) -> None:
     assert ClaudeSettings(anthropic_api_key=blank_key).anthropic_api_key is None  # type: ignore[arg-type]
+
+
+async def test_missing_credentials_are_a_configuration_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for variable in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
+        monkeypatch.delenv(variable, raising=False)
+    transport = responding(200, message_body("end_turn", [{"type": "text", "text": "Hi"}]))
+    sdk_client = anthropic.AsyncAnthropic(
+        max_retries=0, http_client=anthropic.DefaultAsyncHttpxClient(transport=transport)
+    )
+    client = ClaudeClient(ClaudeSettings(anthropic_api_key=None), sdk_client)
+    with pytest.raises(ClaudeConfigurationError, match="set ANTHROPIC_API_KEY"):
+        await create(client)
+    assert transport.requests == []

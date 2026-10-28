@@ -32,6 +32,7 @@ class McpConnectionSettings(AuthenticatedServiceSettings):
     mcp_server_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8100/mcp")
     mcp_api_token: SecretStr | None = api_token_field()
     mcp_tool_call_timeout_seconds: float = Field(default=30.0, gt=0)
+    mcp_startup_wait_seconds: float = Field(default=20.0, ge=0)  # MCP server may start later
 
     @model_validator(mode="after")
     def require_token_when_auth_enabled(self) -> Self:
@@ -48,3 +49,20 @@ class AgentSettings(BaseServiceSettings):
     business_timezone: str = "America/New_York"
     max_tool_rounds: int = Field(default=8, ge=1, le=20)  # Claude calls per question
     tool_result_preview_rows: int = Field(default=10, ge=1, le=100)  # rows Claude sees
+
+
+class AgentServiceSettings(ClaudeSettings, McpConnectionSettings, SessionSettings, AgentSettings):
+    """Everything the agent service reads from the environment / .env."""
+
+    agent_api_token: SecretStr | None = api_token_field()  # what the UI sends (AUTH_ENABLED)
+    transaction_service_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8200")
+    transaction_service_api_token: SecretStr | None = api_token_field()
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173"]  # the Vite dev server
+    )
+
+    @model_validator(mode="after")
+    def require_service_tokens_when_auth_enabled(self) -> Self:
+        self.ensure_api_token(self.agent_api_token, "AGENT_API_TOKEN")
+        self.ensure_api_token(self.transaction_service_api_token, "TRANSACTION_SERVICE_API_TOKEN")
+        return self

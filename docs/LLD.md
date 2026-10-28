@@ -31,6 +31,7 @@ Transaction_Dashboard/
 │       ├── clock.py                  # Clock protocol, SystemClock, FixedClock
 │       ├── logging/setup.py
 │       ├── clients/transaction_service_client.py  # TransactionServiceClient (MCP server + agent)
+│       ├── http/error_responses.py  # shared FastAPI error handlers (ErrorResponse shape)
 │       ├── http/bearer_auth.py       # require_bearer_token(): constant-time static bearer token
 │       └── contracts/                # Pydantic DTOs shared across services
 │           ├── filter_expression.py  # FilterCondition, FilterGroup, FilterNode
@@ -73,11 +74,12 @@ Transaction_Dashboard/
 │   │   ├── tools.py                  # the 5 read-only tools (thin adapters, ToolError on failure)
 │   │   └── tool_descriptions.py      # what Claude reads: filter language, dates, examples
 │   └── agent_service/src/agent_service/
-│       ├── main.py
+│       ├── main.py                   # create_app(): lifespan (waits for MCP), CORS, auth, /health
 │       ├── api/
-│       │   ├── chat_routes.py
-│       │   ├── plan_routes.py        # /plans/execute
-│       │   └── transaction_detail_routes.py
+│       │   ├── routes.py             # /api/chat, /plans/execute, /transactions/{id}, /sessions/...
+│       │   ├── schemas.py            # ChatRequest/Response, ExecutePlanRequest, PlanPageResponse
+│       │   ├── error_handlers.py     # agent errors → ErrorResponse (422/502/503/passthrough)
+│       │   └── dependencies.py       # AgentServiceContainer
 │       ├── settings.py               # ClaudeSettings (model, effort, max tokens, fallbacks, key)
 │       ├── llm/
 │       │   ├── claude_client.py      # ClaudeClient: model/effort/fallbacks, stop reasons, typed errors
@@ -525,13 +527,32 @@ class SearchableRepository[ItemT]:
 ## 6. Agent Service (`:8000`, prefix `/api`)
 
 ### 6.1 Endpoints
+Run with `make run-agent-service`, i.e. `uvicorn agent_service.main:create_app --factory --port 8000`. All routes are under `/api` and need `Authorization: Bearer $AGENT_API_TOKEN` while `AUTH_ENABLED`; `/health` is open.
+
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/chat` | `{session_id?, message}` | `ChatResponse{session_id, reply, query_plan?, result_page?}` |
-| POST | `/plans/execute` | `{query_plan, page, page_size?}` | `PaginatedResult[...]` |
-| GET | `/transactions/{id}` | — | `TransactionDetail` (proxy, used by the Phase 2 drawer) |
-| GET | `/sessions/{id}/entries` | — | stored questions with their query plans |
-| DELETE | `/sessions/{id}` | — | clear session |
+| POST | `/api/chat` | `ChatRequest{message (1-2000), session_id?}` | `ChatResponse{session_id, reply, query_plan, result_entity, result_page, reached_round_limit}`. A new `session_id` (uuid hex) is created when it is omitted; `result_page` is the typed first page |
+| POST | `/api/plans/execute` | `ExecutePlanRequest{query_plan, page=1, page_size=25}` | `PlanPageResponse{result_entity, result_page}`, without calling Claude |
+| GET | `/api/transactions/{id}` | — | `TransactionDetail` (proxied through `TransactionServiceClient`; used by the detail drawer) |
+| GET | `/api/sessions/{id}/entries` | — | `list[SessionEntry]`: questions and query plans only |
+| DELETE | `/api/sessions/{id}` | — | 204 (a "new conversation" button) |
+| GET | `/health` | — | `{status: ok}` (no token) |
+
+- **Startup (lifespan):** waits up to `MCP_STARTUP_WAIT_SECONDS` (20) for the MCP server, retrying every second, because VS Code may launch every service at once. It then raises `McpServerUnavailableError` and refuses to start. After that it opens the `TransactionServiceClient` and `ClaudeClient`, builds the `InMemorySessionStore`, `QueryAgent` and `PlanExecutor` into an `AgentServiceContainer` on `app.state`, and closes everything at shutdown.
+- **`AgentServiceSettings`** combines `ClaudeSettings`, `McpConnectionSettings`, `SessionSettings` and `AgentSettings`, plus `AGENT_API_TOKEN`, `TRANSACTION_SERVICE_URL` / `TRANSACTION_SERVICE_API_TOKEN` and `CORS_ALLOWED_ORIGINS` (default `["http://localhost:5173"]`, the Vite dev server; GET/POST/DELETE with the `Authorization` and `Content-Type` headers).
+- **Errors** all use the shared `ErrorResponse` shape. The common handlers live in `shared/http/error_responses.py` and are shared with the Transaction Service.
+
+  | Status | `error` | When |
+  |---|---|---|
+  | 422 | `INVALID_REQUEST` | Bad body or path (empty or too-long message, bad session_id, page_size > 100) |
+  | 422 | `INVALID_QUESTION` / `INVALID_SESSION_ID` / `PLAN_HAS_NO_SEARCH` / `INVALID_PAGE_REQUEST` | Domain checks |
+  | 422 | `CLAUDE_DECLINED` | Claude refused, even after the server-side fallback; includes the category |
+  | 503 | `CLAUDE_UNAVAILABLE` / `TRANSACTION_SERVICE_UNAVAILABLE` | Try again later |
+  | 502 | `CLAUDE_CONFIGURATION_ERROR` | Bad key, model or request, **or no Claude credentials at all** (the SDK raises a plain `TypeError` for that, which is mapped explicitly) |
+  | 502 | `CLAUDE_REPLY_ERROR` | Truncated or unexpected stop |
+  | passthrough | `TRANSACTION_NOT_FOUND`, `FILTER_VALIDATION_FAILED`, … | Transaction Service errors keep their status and issues |
+- **Test seams:** `create_app(settings, clock, claude, mcp_client_factory, transaction_service_transport)`. Tests run the whole API with a scripted Claude, an in-memory MCP server and the in-process Transaction Service on the seeded database. They cover auth, CORS, startup failure and waiting, chat with a typed page, follow-ups in a session, session entries holding only the question and plan, delete, paging without Claude, detail and 404, every error mapping, and invalid requests never reaching Claude.
+- **Verified with all three real servers** under uvicorn: health, 401, sessions, plan execution (10 chargebacks this month), and `/api/chat` without a key returning `502 CLAUDE_CONFIGURATION_ERROR`.
 
 ```python
 # shared/contracts/query_plan.py: typed steps, unknown keys rejected, so no results can live here
@@ -859,7 +880,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1c-4 | System prompt (stable prefix) + date as a mid-conversation system message | S | P1c-1 | Prompt-cache reads > 0 on the second turn ✅ (the live cache-read check runs with P1c-9) |
 | P1c-5 | `QueryAgent` loop: parallel tool calls, compact tool results, error tool_results, max iterations | L | P1c-1..4 | Scripted tests: success, validation-retry, iteration cap ✅ |
 | P1c-6 | `QueryPlanRecorder` + `PlanExecutor` | M | P1c-5 | Re-running a recorded plan returns the same page 1 as the agent did ✅ |
-| P1c-7 | Routes: `/chat`, `/plans/execute`, `/transactions/{id}`, sessions; CORS for UI | M | P1c-6 | OpenAPI. Session ID created when absent |
+| P1c-7 | Routes: `/chat`, `/plans/execute`, `/transactions/{id}`, sessions; CORS for UI | M | P1c-6 | OpenAPI. Session ID created when absent ✅ |
 | P1c-9 | Live natural-language eval (~25 prompts covering UC1–5, follow-ups, OR/NOT phrasing) | M | P1c-7 | ≥ 90% choose the correct tool and filters; `cache_read_input_tokens` > 0 from the second request |
 
 ### Phase 1d — UI

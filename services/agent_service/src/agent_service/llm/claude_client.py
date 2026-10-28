@@ -26,6 +26,9 @@ from agent_service.settings import ClaudeSettings
 
 REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 ACCEPTED_STOP_REASONS = frozenset({"end_turn", "tool_use", "stop_sequence"})
+MISSING_CREDENTIALS_HINT = (
+    "no usable Claude credentials: set ANTHROPIC_API_KEY in .env or in the environment"
+)
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,13 @@ class ClaudeClient:
             )
         except anthropic.APIError as error:
             raise to_claude_error(error) from error
+        except anthropic.AnthropicError as error:  # e.g. CredentialsError: not an HTTP failure
+            raise ClaudeConfigurationError(f"{MISSING_CREDENTIALS_HINT} ({error})") from error
+        except TypeError as error:
+            # The SDK raises TypeError when it finds no credentials at all.
+            if "authentication method" not in str(error):
+                raise
+            raise ClaudeConfigurationError(MISSING_CREDENTIALS_HINT) from error
         return to_reply(response)
 
     async def aclose(self) -> None:
