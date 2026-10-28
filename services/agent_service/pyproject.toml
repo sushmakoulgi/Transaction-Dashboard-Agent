@@ -1,0 +1,18 @@
+[project]
+name = "agent-service"
+version = "0.1.0"
+description = "Natural-language agent: Claude tool-use loop over the MCP tools, with session memory."
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=1.0",
+    "mcp>=2.3",
+    "pydantic-settings>=2.6",
+    "shared",
+]
+
+[tool.uv.sources]
+shared = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

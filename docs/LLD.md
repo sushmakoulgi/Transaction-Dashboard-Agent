@@ -78,8 +78,9 @@ Transaction_Dashboard/
 │       │   ├── chat_routes.py
 │       │   ├── plan_routes.py        # /plans/execute
 │       │   └── transaction_detail_routes.py
+│       ├── settings.py               # ClaudeSettings (model, effort, max tokens, fallbacks, key)
 │       ├── llm/
-│       │   ├── claude_client.py      # wraps anthropic SDK (one place for model/effort config)
+│       │   ├── claude_client.py      # ClaudeClient: model/effort/fallbacks, stop reasons, typed errors
 │       │   └── system_prompt.py
 │       ├── mcp_bridge/
 │       │   ├── mcp_tool_gateway.py   # connect, list_tools, call_tool
@@ -542,14 +543,30 @@ class QueryPlan(BaseModel):
     result_entity: Literal["transactions", "chargebacks"]
 ```
 
-### 6.2 Claude client (`llm/claude_client.py`)
-- One class owns the model IDs and request settings, read from config:
-  - `PLANNER_MODEL=claude-opus-5-5`, `output_config.effort="medium"`, set explicitly (the default for this model).
-  - Adaptive thinking.
-  - `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) for refusals.
-- Always check `stop_reason`, and handle `refusal` and `max_tokens`.
-- `tool_choice` is `auto`. Forced tool choice isn't supported on this model, so the system prompt steers tool selection.
-- Errors are caught most specific first: `RateLimitError` → retry with backoff, `APIStatusError` → surface to the user, `APIConnectionError` → retry.
+### 6.2 Claude client (`llm/claude_client.py`, `settings.py`)
+- **SDK:** `anthropic` **2.x** (built on `httpx2`), which sends API version **`2026-10-21`** and the key as `Authorization: Bearer`. On this version `temperature` / `top_p` / `top_k` return a 400, and we never send them.
+- **`ClaudeSettings`:**
+  - `PLANNER_MODEL=claude-opus-5-5`.
+  - `PLANNER_EFFORT=medium`, set explicitly although it is also this model's default.
+  - `PLANNER_MAX_TOKENS=16000`, which covers thinking plus the reply.
+  - A 120 s timeout and `CLAUDE_MAX_RETRIES=3`. The SDK itself retries 408/409/429/5xx and network errors.
+  - `USE_REFUSAL_FALLBACKS=true`.
+  - `ANTHROPIC_API_KEY` is optional. When it is blank, the SDK resolves credentials itself (shell `ANTHROPIC_API_KEY` or an `ant auth login` profile).
+- **`ClaudeClient.create_message(system, messages, tools) -> ClaudeReply`** calls `client.beta.messages.create(...)` with:
+  - **No `thinking` parameter.** Thinking is always on for Claude Opus 5.5; disabling it or setting a budget returns a 400.
+  - **`tool_choice={"type": "auto"}` only.** Forced `any` / `tool` returns a 400 on this model, so the system prompt steers tool use.
+  - **`output_config={"effort": ...}`**, plus `cache_control={"type": "ephemeral"}` for automatic prompt caching of the stable tools + system prefix.
+  - **`fallbacks="default"`** with beta `server-side-fallback-2026-07-01` (on by default, configurable). A declined request is re-run server-side on Anthropic's recommended fallback model for that refusal category.
+- **Stop reasons are checked before reading content:**
+  - `end_turn`, `tool_use` and `stop_sequence` are accepted.
+  - `refusal` → `ClaudeRefusalError(category, explanation)`.
+  - `max_tokens` → `ClaudeReplyTruncatedError`.
+  - Anything else (e.g. `pause_turn`) → `ClaudeUnexpectedStopError`.
+- **`ClaudeReply`** keeps `content` (every block, including thinking blocks, **unmodified**, for appending to the turn as-is), plus `text`, `tool_use_requests` (`ToolUseRequest(tool_use_id, tool_name, tool_input)`), `wants_tools`, the model and token usage (including `cache_read_input_tokens`).
+- **Errors are mapped most specific first:**
+  - `RateLimitError`, other 5xx (including 529 overloaded), and connection or timeout errors → `ClaudeUnavailableError` (try again later).
+  - 400 / 401 / 403 / 404 / 422 → `ClaudeConfigurationError` (fix the key, model or request).
+- **Tests** run the real `AsyncAnthropic` over an `httpx2.MockTransport`. They check the exact request body and headers (model, effort, auto tool choice, fallbacks + beta header, no thinking or sampling fields, `anthropic-version: 2026-10-21`, Bearer key), the reply parsing (thinking block signature preserved), each stop reason, and each error mapping.
 
 ### 6.3 Agent loop (`agent/query_agent.py`)
 ```python
@@ -787,7 +804,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 ### Phase 1c — Agent Service
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
-| P1c-1 | `ClaudeClient` (model/effort config, adaptive thinking, fallbacks, stop-reason handling, typed error handling) | M | P0-3 | Unit tests with stubbed SDK cover refusal, max_tokens and rate-limit paths |
+| P1c-1 | `ClaudeClient` (model/effort config, adaptive thinking, fallbacks, stop-reason handling, typed error handling) | M | P0-3 | Unit tests with stubbed SDK cover refusal, max_tokens and rate-limit paths ✅ |
 | P1c-2 | `McpToolGateway` + `ToolDefinitionMapper` (lifespan connect, sorted tool list) | M | P1b-3 | Agent lists MCP tools at startup. Mapped schemas are accepted by the API |
 | P1c-3 | `SessionEntry`, `SessionStore` Protocol + `InMemorySessionStore` (question + plan only, last-N limit, idle TTL) | S | P0-1 | A test checks that no tool result, result row or reply is persisted after a turn. Expiry works |
 | P1c-4 | System prompt (stable prefix) + date as a mid-conversation system message | S | P1c-1 | Prompt-cache reads > 0 on the second turn |
