@@ -5,18 +5,19 @@ from datetime import datetime
 from decimal import Decimal
 
 from shared.contracts.contract_model import ContractModel
+from shared.contracts.identifiers import CustomerId, PaymentId, TransactionId
 
 
 class TransactionSummary(ContractModel):
-    transaction_id: uuid.UUID
-    customer_id: str
+    transaction_id: TransactionId
+    customer_id: CustomerId
     amount: Decimal
     currency: str
     transaction_type: str
     transaction_date: datetime
     merchant_name: str | None
     merchant_category: str | None
-    payment_id: uuid.UUID
+    payment_id: PaymentId
     payment_status: str
     payment_method: str
     card_brand: str | None  # None for bank (ACH) payments
@@ -27,8 +28,8 @@ class TransactionSummary(ContractModel):
 
 class ChargebackSummary(ContractModel):
     chargeback_id: uuid.UUID
-    transaction_id: uuid.UUID
-    customer_id: str
+    transaction_id: TransactionId
+    customer_id: CustomerId
     reason_code: str
     chargeback_status: str
     chargeback_amount: Decimal

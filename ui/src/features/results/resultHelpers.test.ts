@@ -4,7 +4,7 @@ import type { QueryPlan } from '../../api/agentApiTypes'
 import { formatCode, formatDateTime, formatMoney } from './formatters'
 import { nextSort, sortOfPlan, withSort } from './planSorting'
 
-const DETAIL_STEP = { tool_name: 'get_transaction_detail' as const, transaction_id: '00000000-0000-4000-8000-000000000001' }
+const DETAIL_STEP = { tool_name: 'get_transaction_detail' as const, transaction_id: '400000000000001' }
 
 describe('plan sorting', () => {
   it('replaces the sort of the last search only', () => {

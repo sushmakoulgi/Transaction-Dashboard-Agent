@@ -5,7 +5,6 @@ Every tool is read-only. Failures are raised as `ToolError` whose text is a JSON
 suggestions as the REST API and can correct its call.
 """
 
-import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -36,6 +35,7 @@ from shared.contracts import (
     TransactionSummary,
 )
 from shared.contracts.contract_model import ContractModel
+from shared.contracts.identifiers import TransactionId
 from shared.contracts.search_request import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False)
@@ -75,7 +75,7 @@ def register_tools(server: MCPServer[Any]) -> None:
 
     @server.tool(description=tool_descriptions.GET_TRANSACTION_DETAIL, annotations=READ_ONLY)
     async def get_transaction_detail(
-        ctx: Context[Any, Any], transaction_id: uuid.UUID
+        ctx: Context[Any, Any], transaction_id: TransactionId
     ) -> TransactionDetail:
         return await call_transaction_service(
             ctx, lambda client: client.get_transaction_detail(transaction_id)

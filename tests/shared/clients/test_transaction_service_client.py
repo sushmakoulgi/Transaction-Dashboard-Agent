@@ -1,7 +1,6 @@
 """Unit tests for TransactionServiceClient, using httpx's mock transport."""
 
 import json
-import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -80,7 +79,7 @@ async def test_sends_the_token_and_the_request_body() -> None:
 
 
 async def test_paths_for_every_operation() -> None:
-    transaction_id = uuid.uuid4()
+    transaction_id = "999999999999999"
     transport = RecordingTransport(
         json_response(200, EMPTY_PAGE),
         json_response(200, []),
@@ -139,7 +138,7 @@ async def test_client_errors_are_raised_without_retry(
         json_response(status_code, {"error": expected_error, "message": "nope", "issues": []})
     )
     with pytest.raises(TransactionServiceError) as error:
-        await call(transport, lambda client: client.get_transaction_detail(uuid.uuid4()))
+        await call(transport, lambda client: client.get_transaction_detail("999999999999999"))
     assert error.value.error == expected_error
     assert len(transport.requests) == 1
 

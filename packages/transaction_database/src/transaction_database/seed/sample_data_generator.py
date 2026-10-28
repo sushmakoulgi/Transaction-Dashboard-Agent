@@ -5,6 +5,7 @@ plain dicts keyed by column name, ready for SQLAlchemy Core bulk inserts.
 """
 
 import random
+import string
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -30,7 +31,8 @@ CENT = Decimal("0.01")
 @dataclass(frozen=True)
 class SampleDataProfile:
     transaction_count: int = 100
-    customer_ids: tuple[str, ...] = tuple(f"C-{number}" for number in range(1001, 1016))
+    # 8-digit customer IDs, e.g. 10001641.
+    customer_ids: tuple[str, ...] = tuple(str(10001641 + 7919 * n) for n in range(15))
     history_days: int = 90
     current_month_transaction_share: float = 0.30
     refunded_payment_share: float = 0.20
@@ -57,43 +59,24 @@ class SampleDataset:
 
 
 MERCHANTS: tuple[Row, ...] = (
-    {
-        "merchant_id": "M-001",
-        "merchant_name": "Northwind Electronics",
-        "merchant_category": MerchantCategory.ELECTRONICS.value,
-        "country": "US",
-    },
-    {
-        "merchant_id": "M-002",
-        "merchant_name": "Blue Harbor Travel",
-        "merchant_category": MerchantCategory.TRAVEL.value,
-        "country": "US",
-    },
-    {
-        "merchant_id": "M-003",
-        "merchant_name": "Greenleaf Grocers",
-        "merchant_category": MerchantCategory.GROCERY.value,
-        "country": "US",
-    },
-    {
-        "merchant_id": "M-004",
-        "merchant_name": "Streamline Media",
-        "merchant_category": MerchantCategory.DIGITAL_GOODS.value,
-        "country": "GB",
-    },
-    {
-        "merchant_id": "M-005",
-        "merchant_name": "Atlas Outfitters",
-        "merchant_category": MerchantCategory.APPAREL.value,
-        "country": "CA",
-    },
-    {
-        "merchant_id": "M-006",
-        "merchant_name": "Lumen Home Goods",
-        "merchant_category": MerchantCategory.HOME.value,
-        "country": "DE",
-    },
-)
+    {"merchant_id": "M-001", "merchant_name": "ATT",
+     "merchant_category": MerchantCategory.WIRELESS.value, "country": "US"},
+    {"merchant_id": "M-002", "merchant_name": "Rogers",
+     "merchant_category": MerchantCategory.WIRELESS.value, "country": "CA"},
+    {"merchant_id": "M-003", "merchant_name": "WOW",
+     "merchant_category": MerchantCategory.BROADBAND.value, "country": "US"},
+    {"merchant_id": "M-004", "merchant_name": "Verizon",
+     "merchant_category": MerchantCategory.WIRELESS.value, "country": "US"},
+    {"merchant_id": "M-005", "merchant_name": "Comcast",
+     "merchant_category": MerchantCategory.CABLE_TV.value, "country": "US"},
+    {"merchant_id": "M-006", "merchant_name": "Bell",
+     "merchant_category": MerchantCategory.BROADBAND.value, "country": "CA"},
+)  # fmt: skip
+
+CURRENCY_BY_COUNTRY = {"US": "USD", "CA": "CAD"}
+TRANSACTION_ID_LENGTH = 15
+PAYMENT_ID_LENGTH = 12
+PAYMENT_ID_ALPHABET = string.ascii_uppercase + string.digits
 
 REASON_CODES_BY_CARD_BRAND: dict[CardBrand, tuple[tuple[str, str], ...]] = {
     CardBrand.VISA: (
@@ -164,6 +147,7 @@ class SampleDataGenerator:
         if reference_time.tzinfo is None:
             raise ValueError("reference_time must be timezone-aware")
         self._random = random.Random(random_seed)
+        self._issued_ids: set[str] = set()
         self._profile = profile or SampleDataProfile()
         self._reference_time = reference_time.astimezone(UTC)
         local_month_start = reference_time.astimezone(business_timezone).replace(
@@ -202,10 +186,10 @@ class SampleDataGenerator:
             )
         merchant = self._random.choice(MERCHANTS)
         return {
-            "transaction_id": self._random_uuid(),
+            "transaction_id": self._unique_transaction_id(),
             "customer_id": self._random.choice(self._profile.customer_ids),
             "amount": self._random_amount(Decimal("5.00"), Decimal("1500.00")),
-            "currency": self._random.choices(("USD", "EUR", "GBP"), weights=(80, 12, 8))[0],
+            "currency": CURRENCY_BY_COUNTRY[merchant["country"]],
             "transaction_type": self._random.choices(tuple(TransactionType), weights=(75, 20, 5))[
                 0
             ].value,
@@ -245,7 +229,7 @@ class SampleDataGenerator:
             )
 
         return {
-            "payment_id": self._random_uuid(),
+            "payment_id": self._unique_payment_id(),
             "transaction_id": transaction["transaction_id"],
             "customer_id": transaction["customer_id"],
             "payment_method": payment_method.value,
@@ -278,7 +262,7 @@ class SampleDataGenerator:
             card_details["wallet_type"] = self._random.choice(("APPLE_PAY", "GOOGLE_PAY"))
         return card_details
 
-    def _add_refunds(self, dataset: SampleDataset) -> set[uuid.UUID]:
+    def _add_refunds(self, dataset: SampleDataset) -> set[str]:
         captured_payments = [
             payment
             for payment in dataset.payments
@@ -333,9 +317,7 @@ class SampleDataGenerator:
             )
         return refunds
 
-    def _add_chargebacks(
-        self, dataset: SampleDataset, refunded_payment_ids: set[uuid.UUID]
-    ) -> None:
+    def _add_chargebacks(self, dataset: SampleDataset, refunded_payment_ids: set[str]) -> None:
         eligible_pairs = [
             (transaction, payment)
             for transaction, payment in zip(dataset.transactions, dataset.payments, strict=True)
@@ -414,6 +396,23 @@ class SampleDataGenerator:
                 }
             )
         return events
+
+    def _unique_transaction_id(self) -> str:
+        """15 digits, not starting with 0, e.g. 482910375610294."""
+        while True:
+            first_digit = self._random.choice("123456789")
+            transaction_id = first_digit + self._random_digits(TRANSACTION_ID_LENGTH - 1)
+            if transaction_id not in self._issued_ids:
+                self._issued_ids.add(transaction_id)
+                return transaction_id
+
+    def _unique_payment_id(self) -> str:
+        """12 uppercase letters or digits, e.g. K7Q2M9XA4B1Z."""
+        while True:
+            payment_id = "".join(self._random.choices(PAYMENT_ID_ALPHABET, k=PAYMENT_ID_LENGTH))
+            if payment_id not in self._issued_ids:
+                self._issued_ids.add(payment_id)
+                return payment_id
 
     def _random_uuid(self) -> uuid.UUID:
         return uuid.UUID(int=self._random.getrandbits(128), version=4)

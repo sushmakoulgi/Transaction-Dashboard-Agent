@@ -4,7 +4,6 @@ The app runs with its real lifespan (startup write check, service wiring) agains
 docker-compose Postgres. Requests go through httpx without a network socket.
 """
 
-import uuid
 from typing import Any
 
 import httpx
@@ -143,13 +142,13 @@ async def test_transaction_detail(client: httpx.AsyncClient) -> None:
 
 
 async def test_unknown_transaction_returns_404(client: httpx.AsyncClient) -> None:
-    response = await client.get(f"/api/v1/transactions/{uuid.uuid4()}", headers=AUTHORIZED)
+    response = await client.get("/api/v1/transactions/999999999999999", headers=AUTHORIZED)
     assert response.status_code == 404
     assert response.json()["error"] == "TRANSACTION_NOT_FOUND"
 
 
 async def test_malformed_transaction_id_returns_422(client: httpx.AsyncClient) -> None:
-    response = await client.get("/api/v1/transactions/not-a-uuid", headers=AUTHORIZED)
+    response = await client.get("/api/v1/transactions/12345", headers=AUTHORIZED)
     assert response.status_code == 422
     assert response.json()["issues"][0]["path"] == "path.transaction_id"
 
@@ -181,7 +180,7 @@ async def test_unknown_entity_returns_422(client: httpx.AsyncClient) -> None:
 async def test_validate_filters(client: httpx.AsyncClient) -> None:
     valid = await client.post(
         "/api/v1/transactions/filters/validate",
-        json={"filter": condition("customer_id", "eq", "C-1004")},
+        json={"filter": condition("customer_id", "eq", "10001641")},
         headers=AUTHORIZED,
     )
     assert valid.json() == {"is_valid": True, "issues": []}

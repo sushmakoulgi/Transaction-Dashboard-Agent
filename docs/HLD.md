@@ -11,7 +11,7 @@
 
 ## 1. Purpose
 
-Let a user ask questions about payment transactions in natural language ("show chargebacks this month for customer C-1042"), have an LLM agent turn that into safe, read-only API calls, and show the results in a paginated table with drill-down into a single transaction.
+Let a user ask questions about payment transactions in natural language ("show chargebacks this month for customer 10001641"), have an LLM agent turn that into safe, read-only API calls, and show the results in a paginated table with drill-down into a single transaction.
 
 ## 2. Scope
 
@@ -161,7 +161,7 @@ erDiagram
     CHARGEBACKS ||--|{ CHARGEBACK_EVENTS : "has many"
 
     TRANSACTIONS {
-        uuid transaction_id PK
+        text transaction_id PK "15 digits"
         text customer_id
         numeric amount
         char currency
@@ -171,8 +171,8 @@ erDiagram
         jsonb metadata
     }
     PAYMENTS {
-        uuid payment_id PK
-        uuid transaction_id FK "UNIQUE"
+        text payment_id PK "12 alphanumeric"
+        text transaction_id FK "UNIQUE"
         text customer_id
         text payment_method
         text payment_status "AUTHORIZED/CAPTURED/VOIDED/FAILED"
@@ -184,7 +184,7 @@ erDiagram
     }
     REFUNDS {
         uuid refund_id PK
-        uuid original_payment_id FK
+        text original_payment_id FK
         text customer_id
         numeric refund_amount
         text refund_status
@@ -193,7 +193,7 @@ erDiagram
     }
     CHARGEBACKS {
         uuid chargeback_id PK
-        uuid transaction_id FK "UNIQUE"
+        text transaction_id FK "UNIQUE"
         text customer_id
         text reason_code
         numeric chargeback_amount

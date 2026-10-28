@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -25,8 +24,13 @@ from shared.contracts import DetailStep, SearchableEntity, SearchStep
 NEW_YORK = ZoneInfo("America/New_York")
 CLOCK = FixedClock(datetime(2026, 10, 27, 15, tzinfo=UTC))
 SESSION_ID = "session-1"
-CUSTOMER_FILTER = {"kind": "condition", "field": "customer_id", "operator": "eq", "value": "C-1004"}
-BAD_FILTER = {"kind": "condition", "field": "cust_id", "operator": "eq", "value": "C-1004"}
+CUSTOMER_FILTER = {
+    "kind": "condition",
+    "field": "customer_id",
+    "operator": "eq",
+    "value": "10001641",
+}
+BAD_FILTER = {"kind": "condition", "field": "cust_id", "operator": "eq", "value": "10001641"}
 
 
 # --- Scripted tools ---
@@ -34,7 +38,7 @@ BAD_FILTER = {"kind": "condition", "field": "cust_id", "operator": "eq", "value"
 
 def search_page(total_count: int, rows: int) -> dict[str, Any]:
     return {
-        "items": [{"transaction_id": f"t-{n}", "customer_id": "C-1004"} for n in range(rows)],
+        "items": [{"transaction_id": f"t-{n}", "customer_id": "10001641"} for n in range(rows)],
         "page": 1,
         "page_size": 25,
         "total_count": total_count,
@@ -108,17 +112,17 @@ async def test_answers_with_one_search() -> None:
     claude = ScriptedClaude(
         [
             reply_with(thinking(), tool_use("search_transactions", {"filter": CUSTOMER_FILTER})),
-            final_answer("C-1004 has 15 transactions."),
+            final_answer("10001641 has 15 transactions."),
         ]
     )
     agent, _ = build_agent(claude, search_succeeds())
-    answer = await agent.answer(SESSION_ID, "Transactions for C-1004?")
+    answer = await agent.answer(SESSION_ID, "Transactions for 10001641?")
 
-    assert answer.reply == "C-1004 has 15 transactions."
+    assert answer.reply == "10001641 has 15 transactions."
     assert answer.query_plan is not None
     (step,) = answer.query_plan.steps
     assert isinstance(step, SearchStep)
-    assert step.filter is not None and step.filter.model_dump()["value"] == "C-1004"
+    assert step.filter is not None and step.filter.model_dump()["value"] == "10001641"
     assert answer.result_entity is SearchableEntity.TRANSACTIONS
     assert answer.result_page is not None and len(answer.result_page["items"]) == 15
     assert (answer.claude_calls, answer.tool_calls, answer.reached_round_limit) == (2, 1, False)
@@ -132,7 +136,7 @@ async def test_claude_sees_a_trimmed_page_but_the_ui_gets_all_rows() -> None:
         ]
     )
     agent, _ = build_agent(claude, search_succeeds(total_count=40, rows=25))
-    answer = await agent.answer(SESSION_ID, "Transactions for C-1004?")
+    answer = await agent.answer(SESSION_ID, "Transactions for 10001641?")
 
     (tool_result,) = tool_results_in(claude.requests[1][-1])
     shown = json.loads(tool_result["content"])
@@ -148,7 +152,7 @@ async def test_claude_content_goes_back_unmodified() -> None:
     )
     claude = ScriptedClaude([first_reply, final_answer("done")])
     agent, _ = build_agent(claude, search_succeeds())
-    await agent.answer(SESSION_ID, "Transactions for C-1004?")
+    await agent.answer(SESSION_ID, "Transactions for 10001641?")
 
     user, date_context, assistant, tool_results = claude.requests[1]
     assert [user["role"], date_context["role"], assistant["role"], tool_results["role"]] == [
@@ -169,11 +173,11 @@ async def test_validation_error_goes_back_to_claude_and_is_not_in_the_plan() -> 
         [
             reply_with(tool_use("search_transactions", {"filter": BAD_FILTER}, "toolu_bad")),
             reply_with(tool_use("search_transactions", {"filter": CUSTOMER_FILTER}, "toolu_ok")),
-            final_answer("C-1004 has 15 transactions."),
+            final_answer("10001641 has 15 transactions."),
         ]
     )
     agent, _ = build_agent(claude, search_succeeds())
-    answer = await agent.answer(SESSION_ID, "Transactions for C-1004?")
+    answer = await agent.answer(SESSION_ID, "Transactions for 10001641?")
 
     (error_result,) = tool_results_in(claude.requests[1][-1])
     assert error_result["tool_use_id"] == "toolu_bad"
@@ -189,7 +193,7 @@ async def test_stops_after_the_round_limit() -> None:
         [reply_with(tool_use("search_transactions", {"filter": CUSTOMER_FILTER}))]
     )
     agent, sessions = build_agent(claude, search_succeeds(), max_tool_rounds=3)
-    answer = await agent.answer(SESSION_ID, "Transactions for C-1004?")
+    answer = await agent.answer(SESSION_ID, "Transactions for 10001641?")
 
     assert (answer.claude_calls, answer.reached_round_limit) == (3, True)
     assert "within 3 steps" in answer.reply
@@ -202,7 +206,7 @@ async def test_claude_failure_is_raised_and_nothing_is_saved() -> None:
     claude = ScriptedClaude([ClaudeUnavailableError("overloaded")])
     agent, sessions = build_agent(claude, search_succeeds())
     with pytest.raises(ClaudeUnavailableError):
-        await agent.answer(SESSION_ID, "Transactions for C-1004?")
+        await agent.answer(SESSION_ID, "Transactions for 10001641?")
     assert await sessions.load_recent_entries(SESSION_ID) == []
 
 
@@ -219,7 +223,7 @@ async def test_invalid_questions_never_reach_claude(question: str) -> None:
 
 
 async def test_parallel_tool_calls_run_together_and_return_in_one_message() -> None:
-    transaction_id = str(uuid.uuid4())
+    transaction_id = "999999999999999"
     claude = ScriptedClaude(
         [
             reply_with(
@@ -232,7 +236,7 @@ async def test_parallel_tool_calls_run_together_and_return_in_one_message() -> N
     )
     tools = search_succeeds()
     agent, _ = build_agent(claude, tools)
-    answer = await agent.answer(SESSION_ID, "Show C-1004's transactions and the first one")
+    answer = await agent.answer(SESSION_ID, "Show 10001641's transactions and the first one")
 
     assert tools.most_concurrent == 3
     results = tool_results_in(claude.requests[1][-1])
@@ -259,18 +263,18 @@ async def test_saves_only_the_question_and_plan() -> None:
     claude = ScriptedClaude(
         [
             reply_with(tool_use("search_transactions", {"filter": CUSTOMER_FILTER})),
-            final_answer("C-1004 has 15 transactions."),
+            final_answer("10001641 has 15 transactions."),
         ]
     )
     agent, sessions = build_agent(claude, search_succeeds())
-    answer: AgentAnswer = await agent.answer(SESSION_ID, "  Transactions for C-1004?  ")
+    answer: AgentAnswer = await agent.answer(SESSION_ID, "  Transactions for 10001641?  ")
 
     (saved,) = await sessions.load_recent_entries(SESSION_ID)
     assert saved == SessionEntry(
-        user_question="Transactions for C-1004?", query_plan=answer.query_plan
+        user_question="Transactions for 10001641?", query_plan=answer.query_plan
     )
     stored_json = saved.model_dump_json()
-    for leaked in ("C-1004 has 15 transactions", "t-0", "total_count", "items", "sig-1"):
+    for leaked in ("10001641 has 15 transactions", "t-0", "total_count", "items", "sig-1"):
         assert leaked not in stored_json
 
 
@@ -278,11 +282,11 @@ async def test_follow_up_question_carries_the_earlier_question_and_plan() -> Non
     first_claude = ScriptedClaude(
         [
             reply_with(tool_use("search_transactions", {"filter": CUSTOMER_FILTER})),
-            final_answer("C-1004 has 15 transactions."),
+            final_answer("10001641 has 15 transactions."),
         ]
     )
     agent, sessions = build_agent(first_claude, search_succeeds())
-    await agent.answer(SESSION_ID, "Transactions for C-1004?")
+    await agent.answer(SESSION_ID, "Transactions for 10001641?")
 
     follow_up_claude = ScriptedClaude([final_answer("Here are their chargebacks.")])
     follow_up_agent = QueryAgent(
@@ -291,7 +295,7 @@ async def test_follow_up_question_carries_the_earlier_question_and_plan() -> Non
     await follow_up_agent.answer(SESSION_ID, "Now their chargebacks")
 
     opening_user_message = str(follow_up_claude.requests[0][0]["content"])
-    assert '<question number="1">Transactions for C-1004?</question>' in opening_user_message
-    assert '"value":"C-1004"' in opening_user_message
+    assert '<question number="1">Transactions for 10001641?</question>' in opening_user_message
+    assert '"value":"10001641"' in opening_user_message
     assert "<current_question>Now their chargebacks</current_question>" in opening_user_message
-    assert "C-1004 has 15 transactions." not in opening_user_message  # replies are never kept
+    assert "10001641 has 15 transactions." not in opening_user_message  # replies are never kept

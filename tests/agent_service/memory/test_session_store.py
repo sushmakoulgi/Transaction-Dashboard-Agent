@@ -65,7 +65,7 @@ def test_entry_holds_only_the_question_and_the_plan() -> None:
 @pytest.mark.parametrize(
     "extra_field",
     [
-        {"assistant_reply": "C-1004 has 7 transactions."},
+        {"assistant_reply": "10001641 has 7 transactions."},
         {"tool_results": [{"total_count": 7}]},
         {"result_rows": [{"transaction_id": "x"}]},
     ],
@@ -73,7 +73,7 @@ def test_entry_holds_only_the_question_and_the_plan() -> None:
 def test_entry_rejects_replies_and_results(extra_field: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         SessionEntry.model_validate(
-            {"user_question": "Transactions for C-1004?", "query_plan": None, **extra_field}
+            {"user_question": "Transactions for 10001641?", "query_plan": None, **extra_field}
         )
 
 
@@ -95,14 +95,14 @@ async def test_store_accepts_only_session_entries() -> None:
 
 async def test_entries_come_back_oldest_first_with_their_plans() -> None:
     store, _ = build_store()
-    await store.append_entry("s1", entry("Transactions for C-1004?", customer_plan("C-1004")))
+    await store.append_entry("s1", entry("Transactions for 10001641?", customer_plan("10001641")))
     await store.append_entry("s1", entry("Now their chargebacks"))
     entries = await store.load_recent_entries("s1")
     assert [item.user_question for item in entries] == [
-        "Transactions for C-1004?",
+        "Transactions for 10001641?",
         "Now their chargebacks",
     ]
-    assert entries[0].query_plan == customer_plan("C-1004")
+    assert entries[0].query_plan == customer_plan("10001641")
     assert entries[1].query_plan is None
 
 

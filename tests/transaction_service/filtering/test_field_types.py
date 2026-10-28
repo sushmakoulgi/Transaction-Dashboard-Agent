@@ -25,7 +25,7 @@ def coercer() -> FieldValueCoercer:
 @pytest.mark.parametrize(
     ("field_type", "raw_value", "expected"),
     [
-        (FieldType.STRING, "C-1004", "C-1004"),
+        (FieldType.STRING, "10001641", "10001641"),
         (FieldType.DECIMAL, 500, Decimal("500")),
         (FieldType.DECIMAL, 12.5, Decimal("12.5")),
         (FieldType.DECIMAL, "1499.99", Decimal("1499.99")),

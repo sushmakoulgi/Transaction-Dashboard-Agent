@@ -112,9 +112,16 @@ Transaction_Dashboard/
 ## 2. Database
 
 ### 2.1 DDL highlights
+Business identifiers (formats in `shared/contracts/identifiers.py`, checked by the API contracts, path parameters, MCP tools and filters):
+- `transaction_id`: 15 digits, e.g. `482910375610294`
+- `payment_id`: 12 uppercase letters or digits, e.g. `K7Q2M9XA4B1Z`
+- `customer_id`: 8 digits, e.g. `10001641`
+
+Refund, chargeback and chargeback-event IDs stay internal UUIDs. Migration `0002_business_identifiers` changed `transaction_id`/`payment_id` (and the columns referencing them) from uuid to text.
+
 ```sql
 CREATE TABLE transactions (
-    transaction_id    uuid PRIMARY KEY,
+    transaction_id    text PRIMARY KEY,                -- 15 digits
     customer_id       text        NOT NULL,
     amount            numeric(12,2) NOT NULL,
     currency          char(3)     NOT NULL,
@@ -125,8 +132,8 @@ CREATE TABLE transactions (
     UNIQUE (transaction_id, customer_id)             -- target for composite FKs
 );
 CREATE TABLE payments (
-    payment_id        uuid PRIMARY KEY,
-    transaction_id    uuid NOT NULL UNIQUE,
+    payment_id        text PRIMARY KEY,                -- 12 uppercase letters/digits
+    transaction_id    text NOT NULL UNIQUE,
     customer_id       text NOT NULL,
     payment_method    text NOT NULL,                 -- CARD, WALLET, ACH
     payment_status    text NOT NULL,                 -- AUTHORIZED, CAPTURED, VOIDED, FAILED
@@ -138,7 +145,7 @@ CREATE TABLE payments (
 );
 CREATE TABLE refunds (
     refund_id           uuid PRIMARY KEY,
-    original_payment_id uuid NOT NULL,
+    original_payment_id text NOT NULL,
     customer_id         text NOT NULL,
     refund_amount numeric(12,2) NOT NULL, refund_status text NOT NULL,
     refunded_at timestamptz NOT NULL, refund_details jsonb NOT NULL DEFAULT '{}',
@@ -146,7 +153,7 @@ CREATE TABLE refunds (
 );
 CREATE TABLE chargebacks (
     chargeback_id     uuid PRIMARY KEY,
-    transaction_id    uuid NOT NULL UNIQUE,
+    transaction_id    text NOT NULL UNIQUE,
     customer_id       text NOT NULL,
     reason_code text NOT NULL, chargeback_amount numeric(12,2) NOT NULL,
     chargeback_status text NOT NULL, opened_at timestamptz NOT NULL,
@@ -174,7 +181,8 @@ CREATE TABLE chargeback_events (
 
 ### 2.3 Seed data (`transaction_database.seed`)
 - Fixed Faker seed, so every run produces the same data.
-- 100 transactions spread over the last 90 days, but **never before Jan 1 of the current year**, with about 30% in the current month (America/New_York). In January every transaction falls in the current month. Uses 15 customer IDs (`C-1001`…`C-1015`), so each customer has several transactions.
+- 100 transactions spread over the last 90 days, but **never before Jan 1 of the current year**, with about 30% in the current month (America/New_York). In January every transaction falls in the current month. Uses 15 eight-digit customer IDs starting at `10001641`, so each customer has several transactions. Transaction IDs (15 digits) and payment IDs (12 uppercase letters/digits) are random and unique.
+- Merchants are telecom providers: ATT, Verizon, WOW, Comcast (US, billed in USD) and Rogers, Bell (CA, billed in CAD). Categories are `WIRELESS`, `BROADBAND`, `CABLE_TV`; a transaction's currency follows its merchant's country.
 - 1 payment per transaction, in a realistic status mix.
 - About 20% of payments have 1–2 refunds.
 - About 15% of transactions have a chargeback, about half of those opened this month. Each chargeback has 1–4 events in order.
@@ -239,11 +247,11 @@ class SearchRequest(BaseModel):
     page_size: int = Field(25, ge=1, le=100)
 ```
 
-Example: *"Transactions for C-1004 this month that are either refunded or over $500, but not Amex"*
+Example: *"Transactions for 10001641 this month that are either refunded or over $500, but not Amex"*
 ```json
 {
   "filter": {"kind": "group", "logic": "and", "children": [
-    {"kind": "condition", "field": "customer_id", "operator": "eq", "value": "C-1004"},
+    {"kind": "condition", "field": "customer_id", "operator": "eq", "value": "10001641"},
     {"kind": "condition", "field": "transaction_date", "operator": "between", "value": {"relative": "this_month"}},
     {"kind": "group", "logic": "or", "children": [
       {"kind": "condition", "field": "has_refund", "operator": "exists", "value": true},
@@ -310,7 +318,8 @@ class FieldRegistry:
 - **integer:** whole numbers only. `2.0` is accepted; `2.5` is not.
 - **boolean:** `true` / `false`, or the strings "true" / "false".
 - **enum:** case-insensitive match, returned in canonical form. An unknown value lists the allowed values as suggestions.
-- **uuid:** standard UUID strings.
+- **uuid:** standard UUID strings (chargeback IDs).
+- **identifier formats:** a field may carry an `id_format` (`transaction_id`, `payment_id`, `customer_id`). Exact-match values (`eq`, `neq`, `in`, `not_in`) must match it, or the issue is `INVALID_VALUE` with the expected format ("expected 15 digits, e.g. …"). `contains` accepts partial IDs.
 - **string:** at most 200 characters.
 - **timestamp:** ISO 8601.
   - A date-only value (`2026-10-15`) stays a `date`, so the compiler can treat it as the whole business day.
@@ -465,7 +474,7 @@ class SearchableRepository[ItemT]:
 | Status | `error` | When |
 |---|---|---|
 | 422 | `FILTER_VALIDATION_FAILED` | The validator found problems. `issues` lists all of them with paths and suggestions |
-| 422 | `INVALID_REQUEST` | The body or path doesn't match the contract: unknown keys, unsafe field names, `page_size` > 100, nesting > 3, a malformed UUID. Each issue has code `INVALID_REQUEST_SHAPE` and a path such as `filter.field` or `path.transaction_id` |
+| 422 | `INVALID_REQUEST` | The body or path doesn't match the contract: unknown keys, unsafe field names, `page_size` > 100, nesting > 3, a malformed transaction ID in the path. Each issue has code `INVALID_REQUEST_SHAPE` and a path such as `filter.field` or `path.transaction_id` |
 | 404 | `TRANSACTION_NOT_FOUND` | Unknown ID, or outside the current year |
 | 401 / 405 | `UNAUTHORIZED` / `METHOD_NOT_ALLOWED` | Missing or wrong token / write method |
 
@@ -564,7 +573,7 @@ class SearchStep(ContractModel):
 
 class DetailStep(ContractModel):
     tool_name: Literal["get_transaction_detail"]
-    transaction_id: uuid.UUID
+    transaction_id: TransactionId         # 15 digits
 
 QueryPlanStep = Annotated[SearchStep | DetailStep, Field(discriminator="tool_name")]
 
@@ -736,7 +745,7 @@ class EmbeddingProvider(Protocol):
   ```python
   class ExtractedQuery(BaseModel):
       template_text: str  # "chargebacks opened this month for customer {customer_id}"
-      slot_values: dict[str, str]  # {"customer_id": "C-1004"}
+      slot_values: dict[str, str]  # {"customer_id": "10001641"}
       is_self_contained: bool  # False if a pronoun can't be resolved → skip cache, use agent
   ```
 - Relative dates stay in the template as words ("this month"). They are not slots, because the Transaction Service resolves them.
@@ -988,6 +997,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P3-3 | Token and cost metrics per chat turn | S | Shown in logs/metrics |
 | P3-4 | Swap `InMemorySessionStore` → `RedisSessionStore` | S | Sessions survive an agent restart |
 | P3-5 | Security test suite (injection, sort-field abuse, oversized filters) (moved from P1a-12 on 2026-10-27, to run at the end) | M | All payloads rejected or bound. DB unchanged |
+| P3-6 | Business identifier formats: 15-digit transaction IDs, 12-character payment IDs, 8-digit customer IDs; telecom merchants (ATT, Rogers, WOW, …); migration 0002 + reseed (added 2026-10-28) | M | Formats enforced in contracts, routes, MCP tools and filters; seed data matches ✅ |
 
 ### Critical path
 `P0-1 → P0-4 → P1a-3 → P1a-6 → P1a-8 → P1a-10 → P1b-3 → P1c-2 → P1c-5 → P1c-7 → P1d-3 → P1d-4`

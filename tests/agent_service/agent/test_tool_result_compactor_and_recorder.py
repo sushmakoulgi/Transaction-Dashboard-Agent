@@ -1,5 +1,4 @@
 import json
-import uuid
 
 from agent_service.agent.query_plan_recorder import QueryPlanRecorder
 from agent_service.agent.tool_result_compactor import ToolResultCompactor
@@ -47,7 +46,7 @@ def test_errors_pass_through_verbatim() -> None:
 
 def test_recorder_keeps_only_successful_plan_steps_in_order() -> None:
     recorder = QueryPlanRecorder()
-    transaction_id = uuid.uuid4()
+    transaction_id = "999999999999999"
     recorder.record("list_filterable_fields", {"entity": "transactions"}, success({}))
     recorder.record("search_transactions", {"page": 1}, ToolCallOutcome(is_error=True, text="x"))
     recorder.record("search_chargebacks", {"page": 3, "page_size": 10}, success(PAGE))

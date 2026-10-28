@@ -7,6 +7,14 @@ The key comes from this file, never from the request.
 from enum import StrEnum
 
 from shared.contracts import SearchableEntity
+from shared.contracts.identifiers import (
+    CUSTOMER_ID,
+    CUSTOMER_ID_FORMAT,
+    PAYMENT_ID,
+    PAYMENT_ID_FORMAT,
+    TRANSACTION_ID,
+    TRANSACTION_ID_FORMAT,
+)
 from transaction_database.enums import (
     CardBrand,
     ChargebackEventType,
@@ -67,10 +75,18 @@ TRANSACTION_FIELD_REGISTRY = FieldRegistry(
     current_year_scope_field_name="transaction_date",
     fields=[
         filterable_field(
-            "transaction_id", FieldType.UUID, Transaction.transaction_id, "Transaction ID."
+            "transaction_id",
+            FieldType.STRING,
+            Transaction.transaction_id,
+            f"Transaction ID: {TRANSACTION_ID_FORMAT}.",
+            id_format=TRANSACTION_ID,
         ),
         filterable_field(
-            "customer_id", FieldType.STRING, Transaction.customer_id, "Customer ID, e.g. C-1004."
+            "customer_id",
+            FieldType.STRING,
+            Transaction.customer_id,
+            f"Customer ID: {CUSTOMER_ID_FORMAT}.",
+            id_format=CUSTOMER_ID,
         ),
         filterable_field(
             "amount",
@@ -117,10 +133,11 @@ TRANSACTION_FIELD_REGISTRY = FieldRegistry(
         ),
         filterable_field(
             "payment_id",
-            FieldType.UUID,
+            FieldType.STRING,
             Payment.payment_id,
-            "ID of the payment for this transaction.",
+            f"ID of the payment for this transaction: {PAYMENT_ID_FORMAT}.",
             relation=TRANSACTION_PAYMENT,
+            id_format=PAYMENT_ID,
         ),
         filterable_field(
             "payment_status",
@@ -227,12 +244,17 @@ CHARGEBACK_FIELD_REGISTRY = FieldRegistry(
         ),
         filterable_field(
             "transaction_id",
-            FieldType.UUID,
+            FieldType.STRING,
             Chargeback.transaction_id,
-            "ID of the disputed transaction.",
+            f"ID of the disputed transaction: {TRANSACTION_ID_FORMAT}.",
+            id_format=TRANSACTION_ID,
         ),
         filterable_field(
-            "customer_id", FieldType.STRING, Chargeback.customer_id, "Customer ID, e.g. C-1004."
+            "customer_id",
+            FieldType.STRING,
+            Chargeback.customer_id,
+            f"Customer ID: {CUSTOMER_ID_FORMAT}.",
+            id_format=CUSTOMER_ID,
         ),
         filterable_field(
             "reason_code",

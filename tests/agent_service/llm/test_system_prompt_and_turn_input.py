@@ -71,8 +71,8 @@ def test_system_prompt_states_the_key_rules() -> None:
 
 def test_first_question_has_no_history_section() -> None:
     assert (
-        render_question_with_context([], "Transactions for C-1004?")
-        == "<current_question>Transactions for C-1004?</current_question>"
+        render_question_with_context([], "Transactions for 10001641?")
+        == "<current_question>Transactions for 10001641?</current_question>"
     )
 
 
@@ -80,7 +80,7 @@ def test_history_is_numbered_oldest_first_with_plans() -> None:
     rendered = render_question_with_context(
         [
             SessionEntry(
-                user_question="Transactions for C-1004?", query_plan=customer_plan("C-1004")
+                user_question="Transactions for 10001641?", query_plan=customer_plan("10001641")
             ),
             SessionEntry(user_question="What does that mean?", query_plan=None),
         ],
@@ -88,9 +88,9 @@ def test_history_is_numbered_oldest_first_with_plans() -> None:
     )
     lines = rendered.split("\n")
     assert lines[0] == "<previous_questions>"
-    assert lines[1] == '<question number="1">Transactions for C-1004?</question>'
+    assert lines[1] == '<question number="1">Transactions for 10001641?</question>'
     plan_json = lines[2].removeprefix("<query_plan>").removesuffix("</query_plan>")
-    assert json.loads(plan_json)["steps"][0]["filter"]["value"] == "C-1004"
+    assert json.loads(plan_json)["steps"][0]["filter"]["value"] == "10001641"
     assert lines[3] == '<question number="2">What does that mean?</question>'
     assert lines[4] == "<query_plan>none (no search was run)</query_plan>"
     assert lines[5] == "</previous_questions>"

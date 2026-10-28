@@ -1,7 +1,7 @@
 # Transaction-Dashboard-Agent
 Dashboard agent to search payment transactions in natural language.
 
-Ask questions like *"Which chargebacks did customer C-1015 have this month?"*. A Claude agent
+Ask questions like *"Which chargebacks did customer 10033317 have this month?"*. A Claude agent
 turns them into safe, read-only searches through MCP tools, and the UI shows the answer with
 a paginated, sortable results table.
 

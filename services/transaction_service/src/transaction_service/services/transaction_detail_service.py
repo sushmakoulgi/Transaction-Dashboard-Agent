@@ -1,7 +1,5 @@
 """One transaction with its payment, refunds, chargeback and chargeback events."""
 
-import uuid
-
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -24,7 +22,7 @@ from transaction_service.persistence.database import ReadOnlyDatabase
 
 
 class TransactionNotFoundError(LookupError):
-    def __init__(self, transaction_id: uuid.UUID) -> None:
+    def __init__(self, transaction_id: str) -> None:
         super().__init__(f"transaction {transaction_id} not found")
         self.transaction_id = transaction_id
 
@@ -34,7 +32,7 @@ class TransactionDetailService:
         self._database = database
         self._calendar = calendar
 
-    async def get_transaction_detail(self, transaction_id: uuid.UUID) -> TransactionDetail:
+    async def get_transaction_detail(self, transaction_id: str) -> TransactionDetail:
         """Raises `TransactionNotFoundError` for unknown IDs and transactions outside the
         current year (only the current year can be viewed)."""
         year = self._calendar.current_year_range()

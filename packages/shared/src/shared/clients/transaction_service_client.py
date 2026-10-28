@@ -7,7 +7,6 @@ callers can pass the exact problems back to the LLM.
 """
 
 import asyncio
-import uuid
 from types import TracebackType
 from typing import Any, Self
 
@@ -87,7 +86,7 @@ class TransactionServiceClient:
         body = await self._send("POST", "/chargebacks/search", request)
         return PaginatedResult[ChargebackSummary].model_validate(body)
 
-    async def get_transaction_detail(self, transaction_id: uuid.UUID) -> TransactionDetail:
+    async def get_transaction_detail(self, transaction_id: str) -> TransactionDetail:
         body = await self._send("GET", f"/transactions/{transaction_id}")
         return TransactionDetail.model_validate(body)
 

@@ -43,7 +43,7 @@ month (chargeback_opened_at between this_month), with refunds, by amount or merc
 
 Example, a customer's transactions this month:
 {{"filter": {{"kind": "group", "logic": "and", "children": [
-  {{"kind": "condition", "field": "customer_id", "operator": "eq", "value": "C-1004"}},
+  {{"kind": "condition", "field": "customer_id", "operator": "eq", "value": "10001641"}},
   {{"kind": "condition", "field": "transaction_date", "operator": "between",
    "value": {{"relative": "this_month"}}}}]}}}}
 
@@ -61,7 +61,7 @@ this_month), by status, by reason code, or with a given event (chargeback_event_
 
 Example, a customer's chargebacks opened this month:
 {{"filter": {{"kind": "group", "logic": "and", "children": [
-  {{"kind": "condition", "field": "customer_id", "operator": "eq", "value": "C-1004"}},
+  {{"kind": "condition", "field": "customer_id", "operator": "eq", "value": "10001641"}},
   {{"kind": "condition", "field": "opened_at", "operator": "between",
    "value": {{"relative": "this_month"}}}}]}}}}
 

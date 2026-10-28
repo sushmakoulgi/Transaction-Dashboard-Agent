@@ -1,4 +1,3 @@
-import uuid
 from typing import Any
 
 import pytest
@@ -14,7 +13,7 @@ def plan(*steps: dict[str, Any]) -> QueryPlan:
 
 
 def test_search_then_detail_plan() -> None:
-    transaction_id = uuid.uuid4()
+    transaction_id = "999999999999999"
     query_plan = plan(
         {"tool_name": "search_chargebacks", "filter": CUSTOMER_FILTER},
         {"tool_name": "get_transaction_detail", "transaction_id": str(transaction_id)},
@@ -35,7 +34,7 @@ def test_last_search_is_the_most_recent_search() -> None:
     assert query_plan.last_search is query_plan.steps[1]
     assert (
         plan(
-            {"tool_name": "get_transaction_detail", "transaction_id": str(uuid.uuid4())}
+            {"tool_name": "get_transaction_detail", "transaction_id": "999999999999999"}
         ).last_search
         is None
     )
@@ -47,7 +46,7 @@ def test_last_search_is_the_most_recent_search() -> None:
         {"tool_name": "search_transactions", "items": [{"transaction_id": "x"}]},
         {"tool_name": "search_transactions", "total_count": 15},
         {"tool_name": "search_transactions", "page": 2},
-        {"tool_name": "get_transaction_detail", "transaction_id": str(uuid.uuid4()), "payment": {}},
+        {"tool_name": "get_transaction_detail", "transaction_id": "999999999999999", "payment": {}},
     ],
 )
 def test_steps_have_no_place_for_results_or_paging(step_with_result_data: dict[str, Any]) -> None:

@@ -1,9 +1,8 @@
 """Read-only HTTP API. Searches use POST only so the filter tree can travel as a JSON body."""
 
-import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Path
 
 from shared.contracts import (
     ChargebackSummary,
@@ -16,6 +15,7 @@ from shared.contracts import (
     TransactionDetail,
     TransactionSummary,
 )
+from shared.contracts.identifiers import TRANSACTION_ID_PATTERN
 from transaction_service.api.dependencies import (
     get_search_service,
     get_transaction_detail_service,
@@ -72,7 +72,8 @@ async def list_filterable_fields(
     responses={404: {"model": ErrorResponse, "description": "Unknown or outside current year"}},
 )
 async def get_transaction_detail(
-    transaction_id: uuid.UUID, detail_service: TransactionDetailServiceDependency
+    transaction_id: Annotated[str, Path(pattern=TRANSACTION_ID_PATTERN)],
+    detail_service: TransactionDetailServiceDependency,
 ) -> TransactionDetail:
     return await detail_service.get_transaction_detail(transaction_id)
 

@@ -6,10 +6,11 @@ from decimal import Decimal
 from typing import Any
 
 from shared.contracts.contract_model import ContractModel
+from shared.contracts.identifiers import CustomerId, PaymentId, TransactionId
 
 
 class PaymentDetail(ContractModel):
-    payment_id: uuid.UUID
+    payment_id: PaymentId
     payment_method: str
     payment_status: str
     authorized_amount: Decimal | None
@@ -46,8 +47,8 @@ class ChargebackDetail(ContractModel):
 
 
 class TransactionDetail(ContractModel):
-    transaction_id: uuid.UUID
-    customer_id: str
+    transaction_id: TransactionId
+    customer_id: CustomerId
     amount: Decimal
     currency: str
     transaction_type: str

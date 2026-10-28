@@ -13,7 +13,7 @@ from shared.contracts import (
 )
 
 
-def condition(field: str = "customer_id", operator: str = "eq", value: Any = "C-1004") -> dict:
+def condition(field: str = "customer_id", operator: str = "eq", value: Any = "10001641") -> dict:
     return {"kind": "condition", "field": field, "operator": operator, "value": value}
 
 
@@ -32,7 +32,7 @@ def test_parses_nested_and_or_not_filter_with_relative_date() -> None:
     request = SearchRequest.model_validate(
         {
             "filter": group(
-                condition("customer_id", "eq", "C-1004"),
+                condition("customer_id", "eq", "10001641"),
                 condition("transaction_date", "between", {"relative": "this_month"}),
                 group(
                     condition("has_refund", "exists", True),
@@ -60,7 +60,7 @@ def test_parses_nested_and_or_not_filter_with_relative_date() -> None:
 def test_single_condition_is_a_valid_filter() -> None:
     request = SearchRequest.model_validate({"filter": condition()})
     assert request.filter == FilterCondition(
-        field="customer_id", operator=Operator.EQUALS, value="C-1004"
+        field="customer_id", operator=Operator.EQUALS, value="10001641"
     )
 
 

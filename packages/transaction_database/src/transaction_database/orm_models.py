@@ -41,7 +41,7 @@ class Transaction(Base):
         Index("ix_transactions_merchant_details", "merchant_details", postgresql_using="gin"),
     )
 
-    transaction_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    transaction_id: Mapped[str] = mapped_column(Text, primary_key=True)  # 15 digits
     customer_id: Mapped[str] = mapped_column(Text)
     amount: Mapped[Decimal] = mapped_column(MONEY)
     currency: Mapped[str] = mapped_column(CHAR(3))
@@ -73,8 +73,8 @@ class Payment(Base):
         Index("ix_payments_payment_details", "payment_details", postgresql_using="gin"),
     )
 
-    payment_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
-    transaction_id: Mapped[uuid.UUID]
+    payment_id: Mapped[str] = mapped_column(Text, primary_key=True)  # 12 alphanumeric
+    transaction_id: Mapped[str] = mapped_column(Text)
     customer_id: Mapped[str] = mapped_column(Text)
     payment_method: Mapped[str] = mapped_column(Text)
     payment_status: Mapped[str] = mapped_column(Text)
@@ -101,7 +101,7 @@ class Refund(Base):
     )
 
     refund_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
-    original_payment_id: Mapped[uuid.UUID]
+    original_payment_id: Mapped[str] = mapped_column(Text)
     customer_id: Mapped[str] = mapped_column(Text)
     refund_amount: Mapped[Decimal] = mapped_column(MONEY)
     refund_status: Mapped[str] = mapped_column(Text)
@@ -125,7 +125,7 @@ class Chargeback(Base):
     )
 
     chargeback_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
-    transaction_id: Mapped[uuid.UUID]
+    transaction_id: Mapped[str] = mapped_column(Text)
     customer_id: Mapped[str] = mapped_column(Text)
     reason_code: Mapped[str] = mapped_column(Text)
     chargeback_amount: Mapped[Decimal] = mapped_column(MONEY)

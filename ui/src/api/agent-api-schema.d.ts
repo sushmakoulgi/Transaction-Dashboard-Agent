@@ -187,7 +187,10 @@ export interface components {
             chargeback_status: string;
             /** Currency */
             currency: string;
-            /** Customer Id */
+            /**
+             * Customer Id
+             * @description Customer ID: 8 digits, e.g. 10001641
+             */
             customer_id: string;
             /** Latest Event Type */
             latest_event_type: string | null;
@@ -207,7 +210,7 @@ export interface components {
             transaction_date: string;
             /**
              * Transaction Id
-             * Format: uuid
+             * @description Transaction ID: 15 digits, e.g. 482910375610294
              */
             transaction_id: string;
         };
@@ -240,7 +243,7 @@ export interface components {
             tool_name: "get_transaction_detail";
             /**
              * Transaction Id
-             * Format: uuid
+             * @description Transaction ID: 15 digits, e.g. 482910375610294
              */
             transaction_id: string;
         };
@@ -407,7 +410,7 @@ export interface components {
             };
             /**
              * Payment Id
-             * Format: uuid
+             * @description Payment ID: 12 uppercase letters or digits, e.g. K7Q2M9XA4B1Z
              */
             payment_id: string;
             /** Payment Method */
@@ -525,7 +528,10 @@ export interface components {
             chargeback: components["schemas"]["ChargebackDetail"] | null;
             /** Currency */
             currency: string;
-            /** Customer Id */
+            /**
+             * Customer Id
+             * @description Customer ID: 8 digits, e.g. 10001641
+             */
             customer_id: string;
             /** Merchant Details */
             merchant_details: {
@@ -545,7 +551,7 @@ export interface components {
             transaction_date: string;
             /**
              * Transaction Id
-             * Format: uuid
+             * @description Transaction ID: 15 digits, e.g. 482910375610294
              */
             transaction_id: string;
             /** Transaction Type */
@@ -561,7 +567,10 @@ export interface components {
             chargeback_status: string | null;
             /** Currency */
             currency: string;
-            /** Customer Id */
+            /**
+             * Customer Id
+             * @description Customer ID: 8 digits, e.g. 10001641
+             */
             customer_id: string;
             /** Has Chargeback */
             has_chargeback: boolean;
@@ -573,7 +582,7 @@ export interface components {
             merchant_name: string | null;
             /**
              * Payment Id
-             * Format: uuid
+             * @description Payment ID: 12 uppercase letters or digits, e.g. K7Q2M9XA4B1Z
              */
             payment_id: string;
             /** Payment Method */
@@ -587,7 +596,7 @@ export interface components {
             transaction_date: string;
             /**
              * Transaction Id
-             * Format: uuid
+             * @description Transaction ID: 15 digits, e.g. 482910375610294
              */
             transaction_id: string;
             /** Transaction Type */

@@ -1,6 +1,5 @@
 """The shared client talking to the real Transaction Service app (in-process, seeded database)."""
 
-import uuid
 from collections.abc import AsyncIterator
 
 import httpx
@@ -83,5 +82,5 @@ async def test_field_list_and_not_found(service_client: TransactionServiceClient
     fields = await service_client.list_filterable_fields(SearchableEntity.TRANSACTIONS)
     assert "card_brand" in {field.name for field in fields}
     with pytest.raises(TransactionServiceError) as error:
-        await service_client.get_transaction_detail(uuid.uuid4())
+        await service_client.get_transaction_detail("999999999999999")
     assert (error.value.status_code, error.value.error) == (404, "TRANSACTION_NOT_FOUND")

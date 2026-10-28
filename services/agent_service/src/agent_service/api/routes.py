@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Path, Response, status
 
 from agent_service.api.dependencies import AgentServiceContainer, get_container
 from agent_service.api.schemas import (
@@ -22,6 +22,7 @@ from shared.contracts import (
     TransactionDetail,
     TransactionSummary,
 )
+from shared.contracts.identifiers import TRANSACTION_ID_PATTERN
 
 Container = Annotated[AgentServiceContainer, Depends(get_container)]
 ERRORS: dict[int | str, dict[str, Any]] = {
@@ -64,7 +65,7 @@ async def execute_plan(request: ExecutePlanRequest, container: Container) -> Pla
 
 @router.get("/transactions/{transaction_id}", response_model=TransactionDetail, responses=ERRORS)
 async def get_transaction_detail(
-    transaction_id: uuid.UUID, container: Container
+    transaction_id: Annotated[str, Path(pattern=TRANSACTION_ID_PATTERN)], container: Container
 ) -> TransactionDetail:
     """Everything about one transaction, for the detail view."""
     return await container.transaction_service.get_transaction_detail(transaction_id)

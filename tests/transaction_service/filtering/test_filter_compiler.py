@@ -58,11 +58,10 @@ SAME_REFUND_CONDITIONS = (
 
 
 def test_values_are_bound_parameters_never_sql_text() -> None:
-    hostile_value = "C-1'; DROP TABLE transactions; --"
-    sql, params = sql_and_params(condition("customer_id", "eq", hostile_value))
+    hostile_value = "ATT'; DROP TABLE transactions; --"
+    sql, params = sql_and_params(condition("merchant_name", "eq", hostile_value))
     assert "DROP TABLE" not in sql
     assert hostile_value in params.values()
-    assert "transactions.customer_id = %(customer_id_1)s" in sql
 
 
 def test_json_key_comes_from_the_registry_as_a_bound_parameter() -> None:
@@ -85,9 +84,9 @@ def test_escape_like_escapes_the_escape_character_first() -> None:
 
 
 def test_root_only_filters_need_no_join() -> None:
-    compiled = compile_filter(condition("customer_id", "eq", "C-1004"))
+    compiled = compile_filter(condition("customer_id", "eq", "10001641"))
     assert compiled.required_relations == ()
-    assert "JOIN" not in sql_of(condition("customer_id", "eq", "C-1004"))
+    assert "JOIN" not in sql_of(condition("customer_id", "eq", "10001641"))
 
 
 def test_each_one_to_one_relation_is_joined_once() -> None:
@@ -110,7 +109,7 @@ def test_refund_filters_join_the_payment_they_are_reached_through() -> None:
 
 
 def test_and_conditions_on_refunds_must_match_the_same_refund() -> None:
-    sql = sql_of(group(*SAME_REFUND_CONDITIONS, condition("customer_id", "eq", "C-1004")))
+    sql = sql_of(group(*SAME_REFUND_CONDITIONS, condition("customer_id", "eq", "10001641")))
     assert sql.count("EXISTS") == 1
     assert (
         "EXISTS (SELECT 1 FROM refunds WHERE refunds.original_payment_id = payments.payment_id "

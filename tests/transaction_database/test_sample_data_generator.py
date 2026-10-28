@@ -1,3 +1,4 @@
+import re
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -5,6 +6,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from shared.contracts.identifiers import (
+    CUSTOMER_ID_PATTERN,
+    PAYMENT_ID_PATTERN,
+    TRANSACTION_ID_PATTERN,
+)
 from transaction_database.enums import PaymentMethod, PaymentStatus
 from transaction_database.seed.sample_data_generator import SampleDataGenerator, SampleDataset
 
@@ -37,6 +43,29 @@ def test_generates_one_hundred_transactions_each_with_exactly_one_payment(
     payment_counts = Counter(payment["transaction_id"] for payment in dataset.payments)
     assert set(payment_counts) == {row["transaction_id"] for row in dataset.transactions}
     assert set(payment_counts.values()) == {1}
+
+
+def test_identifiers_follow_the_business_formats_and_are_unique(dataset: SampleDataset) -> None:
+    transaction_ids = [row["transaction_id"] for row in dataset.transactions]
+    payment_ids = [row["payment_id"] for row in dataset.payments]
+    assert all(re.fullmatch(TRANSACTION_ID_PATTERN, value) for value in transaction_ids)
+    assert all(re.fullmatch(PAYMENT_ID_PATTERN, value) for value in payment_ids)
+    assert all(
+        re.fullmatch(CUSTOMER_ID_PATTERN, row["customer_id"]) for row in dataset.transactions
+    )
+    assert len(set(transaction_ids)) == len(transaction_ids)
+    assert len(set(payment_ids)) == len(payment_ids)
+
+
+def test_merchants_are_telecom_providers_billing_in_their_country_currency(
+    dataset: SampleDataset,
+) -> None:
+    merchants = {row["merchant_details"]["merchant_name"] for row in dataset.transactions}
+    assert merchants <= {"ATT", "Rogers", "WOW", "Verizon", "Comcast", "Bell"}
+    assert {"ATT", "Rogers", "WOW"} <= merchants
+    for row in dataset.transactions:
+        country = row["merchant_details"]["country"]
+        assert row["currency"] == {"US": "USD", "CA": "CAD"}[country]
 
 
 def test_customer_id_matches_parent_row_everywhere(dataset: SampleDataset) -> None:

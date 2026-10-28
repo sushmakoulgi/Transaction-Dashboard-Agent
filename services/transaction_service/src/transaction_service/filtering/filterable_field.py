@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import ColumnElement, SQLColumnExpression
 
 from shared.contracts.filter_expression import Operator
+from shared.contracts.identifiers import IdentifierFormat
 from transaction_database.orm_models import Base
 from transaction_service.filtering.field_types import FieldType
 
@@ -71,6 +72,8 @@ class FilterableField:
     relation: Relation | None = None
     enum_values: tuple[str, ...] = field(default=())
     is_sortable: bool = False
+    value_pattern: str | None = None  # exact-match values must match (e.g. ID formats)
+    value_format: str | None = None  # readable form of the pattern, for error messages
 
     def __post_init__(self) -> None:
         if not self.operators:
@@ -97,6 +100,7 @@ def filterable_field(
     enum_values: tuple[str, ...] = (),
     is_sortable: bool = False,
     is_nullable: bool = False,
+    id_format: IdentifierFormat | None = None,
 ) -> FilterableField:
     """A field with the default operators for its type (plus `is_null` when nullable)."""
     operators = DEFAULT_OPERATORS_BY_FIELD_TYPE[field_type]
@@ -111,6 +115,8 @@ def filterable_field(
         relation=relation,
         enum_values=enum_values,
         is_sortable=is_sortable,
+        value_pattern=id_format.pattern if id_format else None,
+        value_format=id_format.description if id_format else None,
     )
 
 

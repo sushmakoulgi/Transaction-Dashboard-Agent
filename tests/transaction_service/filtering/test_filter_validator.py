@@ -71,8 +71,8 @@ def test_use_case_2_transactions_with_chargebacks_this_month() -> None:
 
 
 def test_use_case_3_and_4_by_customer_and_payment() -> None:
-    assert predicate_of("customer_id", "eq", "C-1004") == Comparison(Operator.EQUALS, "C-1004")
-    payment_id = "3f2b8c1e-9d4a-4e6b-8f1a-2c3d4e5f6a7b"
+    assert predicate_of("customer_id", "eq", "10001641") == Comparison(Operator.EQUALS, "10001641")
+    payment_id = "K7Q2M9XA4B1Z"
     predicate = predicate_of("payment_id", "eq", payment_id)
     assert isinstance(predicate, Comparison)
     assert str(predicate.value) == payment_id
@@ -81,7 +81,7 @@ def test_use_case_3_and_4_by_customer_and_payment() -> None:
 def test_use_case_5_customer_chargebacks_this_month() -> None:
     validated = validate(
         group(
-            condition("customer_id", "eq", "C-1004"),
+            condition("customer_id", "eq", "10001641"),
             condition("opened_at", "between", {"relative": "this_month"}),
         ),
         registry=CHARGEBACK_FIELD_REGISTRY,
@@ -153,7 +153,7 @@ def test_contains_null_and_exists_predicates() -> None:
 def test_group_structure_is_preserved() -> None:
     validated = validate(
         group(
-            condition("customer_id", "eq", "C-1004"),
+            condition("customer_id", "eq", "10001641"),
             group(
                 condition("has_refund", "exists", True),
                 condition("amount", "gt", 500),
@@ -181,7 +181,7 @@ def test_default_and_explicit_sort() -> None:
 
 def test_unknown_field_is_reported_with_suggestions() -> None:
     with pytest.raises(FilterValidationFailedError) as error:
-        validate(condition("cust_id", "eq", "C-1004"))
+        validate(condition("cust_id", "eq", "10001641"))
     (issue,) = error.value.issues
     assert issue.path == "filter.field"
     assert issue.code is FilterIssueCode.UNKNOWN_FIELD
@@ -230,6 +230,37 @@ def test_value_shape_problems(
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("transaction_id", "12345"),
+        ("transaction_id", "3f2b8c1e-9d4a-4e6b-8f1a-2c3d4e5f6a7b"),
+        ("payment_id", "k7q2m9xa4b1z"),
+        ("payment_id", "K7Q2M9XA4B1"),
+        ("customer_id", "C-1004"),
+    ],
+)
+def test_identifiers_in_the_wrong_format_are_rejected(field: str, value: str) -> None:
+    with pytest.raises(FilterValidationFailedError) as error:
+        validate(condition(field, "eq", value))
+    (issue,) = error.value.issues
+    assert (issue.path, issue.code) == ("filter.value", FilterIssueCode.INVALID_VALUE)
+    assert "expected" in issue.message
+
+
+def test_identifiers_in_the_right_format_are_accepted() -> None:
+    assert predicate_of("transaction_id", "eq", "482910375610294") == Comparison(
+        Operator.EQUALS, "482910375610294"
+    )
+    assert predicate_of("payment_id", "in", ["K7Q2M9XA4B1Z", "X7JLXWJKSOVZ"]) == Membership(
+        ("K7Q2M9XA4B1Z", "X7JLXWJKSOVZ")
+    )
+
+
+def test_contains_accepts_a_partial_identifier() -> None:
+    assert isinstance(predicate_of("transaction_id", "contains", "4829"), TextContains)
+
+
+@pytest.mark.parametrize(
     ("operator", "value"),
     [
         ("eq", "2025-12-31"),
@@ -265,7 +296,7 @@ def test_every_bad_list_item_is_reported() -> None:
 def test_all_problems_across_the_tree_and_sort_are_reported_in_one_pass() -> None:
     issues = issues_of(
         group(
-            condition("cust_id", "eq", "C-1004"),
+            condition("cust_id", "eq", "10001641"),
             group(
                 condition("amount", "contains", "5"),
                 condition("payment_status", "eq", "SETTLED"),

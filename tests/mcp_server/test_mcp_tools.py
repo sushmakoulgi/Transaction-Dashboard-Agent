@@ -2,7 +2,6 @@
 Service app running in-process on the seeded database."""
 
 import json
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -144,7 +143,7 @@ async def test_validate_filters_reports_problems_without_an_error() -> None:
                 mcp_client,
                 "validate_filters",
                 entity="chargebacks",
-                filter=condition("customer_id", "eq", "C-1004"),
+                filter=condition("customer_id", "eq", "10001641"),
             )
         )
         assert valid == {"is_valid": True, "issues": []}
@@ -216,7 +215,7 @@ async def test_arguments_that_break_the_schema_are_rejected() -> None:
 async def test_unknown_transaction_is_reported() -> None:
     async with connected_client() as mcp_client:
         body = error_body(
-            await call(mcp_client, "get_transaction_detail", transaction_id=str(uuid.uuid4()))
+            await call(mcp_client, "get_transaction_detail", transaction_id="999999999999999")
         )
         assert body["error"] == "TRANSACTION_NOT_FOUND"
 

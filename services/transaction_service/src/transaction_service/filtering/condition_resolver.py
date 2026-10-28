@@ -4,6 +4,7 @@ Problems are reported as `ConditionIssue`s with a path suffix such as ".value[1]
 validator adds the condition's own path in front.
 """
 
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -84,7 +85,10 @@ class ConditionResolver:
         if operator is Operator.BETWEEN:
             return self._between(field, value)
         if operator is Operator.CONTAINS:
-            return TextContains(text=str(self._coerce_scalar(field, value, VALUE_PATH)))
+            # Partial text: an ID fragment needn't match the full ID format.
+            return TextContains(
+                text=str(self._coerce_scalar(field, value, VALUE_PATH, enforce_format=False))
+            )
         if operator in COMPARISON_OPERATORS:
             return self._comparison(field, operator, value)
         raise ValueError(f"unsupported operator {operator}")
@@ -184,7 +188,11 @@ class ConditionResolver:
         return tuple(coerced_values)
 
     def _coerce_scalar(
-        self, field: FilterableField, value: FilterValue, path_suffix: str
+        self,
+        field: FilterableField,
+        value: FilterValue,
+        path_suffix: str,
+        enforce_format: bool = True,
     ) -> CoercedValue:
         if isinstance(value, list):
             raise invalid(
@@ -204,7 +212,7 @@ class ConditionResolver:
                 path_suffix, FilterIssueCode.INVALID_VALUE, f"{field.name}: needs a value"
             )
         try:
-            return self._coercer.coerce(field.field_type, value, field.enum_values)
+            coerced = self._coercer.coerce(field.field_type, value, field.enum_values)
         except ValueCoercionError as error:
             raise invalid(
                 path_suffix,
@@ -212,6 +220,19 @@ class ConditionResolver:
                 f"{field.name}: {error.message}",
                 error.suggestions,
             ) from None
+        if (
+            enforce_format
+            and field.value_pattern is not None
+            and isinstance(coerced, str)
+            and not re.fullmatch(field.value_pattern, coerced)
+        ):
+            raise invalid(
+                path_suffix,
+                FilterIssueCode.INVALID_VALUE,
+                f"{field.name}: '{coerced}' is not a valid {field.name}; "
+                f"expected {field.value_format or field.value_pattern}",
+            )
+        return coerced
 
     def _flag(self, field: FilterableField, value: FilterValue) -> bool:
         """`exists` / `is_null` take true (the default) or false."""

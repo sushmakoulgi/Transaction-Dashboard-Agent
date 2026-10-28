@@ -1,7 +1,6 @@
 """The agent service HTTP API with a scripted Claude, an in-memory MCP server and the real
 Transaction Service in-process (seeded Postgres)."""
 
-import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
@@ -240,7 +239,7 @@ async def test_transaction_detail_and_not_found() -> None:
         detail = await client.get(
             f"/api/transactions/{first_item['transaction_id']}", headers=AUTHORIZED
         )
-        missing = await client.get(f"/api/transactions/{uuid.uuid4()}", headers=AUTHORIZED)
+        missing = await client.get("/api/transactions/999999999999999", headers=AUTHORIZED)
     assert detail.status_code == 200
     assert detail.json()["chargeback"]["events"]
     assert (missing.status_code, missing.json()["error"]) == (404, "TRANSACTION_NOT_FOUND")
@@ -284,7 +283,7 @@ async def test_invalid_chat_requests(body: dict[str, Any]) -> None:
 
 async def test_execute_plan_errors() -> None:
     detail_only = {
-        "steps": [{"tool_name": "get_transaction_detail", "transaction_id": str(uuid.uuid4())}]
+        "steps": [{"tool_name": "get_transaction_detail", "transaction_id": "999999999999999"}]
     }
     search_plan = {"steps": [{"tool_name": "search_transactions"}]}
     async with agent_api([final_answer("unused")]) as (client, _):

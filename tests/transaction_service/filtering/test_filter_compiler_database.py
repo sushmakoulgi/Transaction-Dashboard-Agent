@@ -172,11 +172,10 @@ def test_chargebacks_with_an_event_type(readonly_connection: Connection) -> None
 
 
 def test_contains_on_a_json_field(readonly_connection: Connection) -> None:
-    ids = matching_ids(readonly_connection, condition("merchant_name", "contains", "harbor"))
+    ids = matching_ids(readonly_connection, condition("merchant_name", "contains", "ro"))
     assert len(ids) == count_by_sql(
         readonly_connection,
-        "SELECT count(*) FROM transactions WHERE merchant_details ->> 'merchant_name' "
-        "ILIKE '%harbor%'",
+        "SELECT count(*) FROM transactions WHERE merchant_details ->> 'merchant_name' ILIKE '%ro%'",
     )
     assert len(ids) > 0
 

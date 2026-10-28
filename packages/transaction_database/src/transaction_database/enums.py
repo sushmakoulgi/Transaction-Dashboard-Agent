@@ -10,12 +10,9 @@ class TransactionType(StrEnum):
 
 
 class MerchantCategory(StrEnum):
-    ELECTRONICS = "ELECTRONICS"
-    TRAVEL = "TRAVEL"
-    GROCERY = "GROCERY"
-    DIGITAL_GOODS = "DIGITAL_GOODS"
-    APPAREL = "APPAREL"
-    HOME = "HOME"
+    WIRELESS = "WIRELESS"
+    BROADBAND = "BROADBAND"
+    CABLE_TV = "CABLE_TV"
 
 
 class PaymentMethod(StrEnum):

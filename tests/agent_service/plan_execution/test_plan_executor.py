@@ -1,6 +1,5 @@
 """PlanExecutor with a fake client (unit) and against the real stack (end to end)."""
 
-import uuid
 from datetime import timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -38,7 +37,7 @@ from transaction_service.main import create_app
 from transaction_service.settings import TransactionServiceSettings
 
 SERVICE_TOKEN = SecretStr("service-token-0123456789abcdef")
-CUSTOMER_FILTER = condition("customer_id", "eq", "C-1004")
+CUSTOMER_FILTER = condition("customer_id", "eq", "10001641")
 
 
 def plan(*steps: dict[str, Any]) -> QueryPlan:
@@ -79,7 +78,7 @@ async def test_reruns_the_last_search_with_the_requested_page() -> None:
                 "filter": CUSTOMER_FILTER,
                 "sort": {"field": "opened_at", "direction": "asc"},
             },
-            {"tool_name": "get_transaction_detail", "transaction_id": str(uuid.uuid4())},
+            {"tool_name": "get_transaction_detail", "transaction_id": "999999999999999"},
         ),
         page=3,
         page_size=10,
@@ -88,12 +87,12 @@ async def test_reruns_the_last_search_with_the_requested_page() -> None:
     assert entity == "chargebacks"
     assert page.entity is SearchableEntity.CHARGEBACKS
     assert (request.page, request.page_size) == (3, 10)
-    assert request.filter is not None and request.filter.model_dump()["value"] == "C-1004"
+    assert request.filter is not None and request.filter.model_dump()["value"] == "10001641"
     assert request.sort is not None and request.sort.direction == "asc"
 
 
 async def test_plan_without_a_search_cannot_be_paged() -> None:
-    detail_only = plan({"tool_name": "get_transaction_detail", "transaction_id": str(uuid.uuid4())})
+    detail_only = plan({"tool_name": "get_transaction_detail", "transaction_id": "999999999999999"})
     with pytest.raises(PlanHasNoSearchError):
         await PlanExecutor(RecordingSearchClient()).execute(detail_only, page=1, page_size=25)
 

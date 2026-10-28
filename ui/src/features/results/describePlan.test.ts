@@ -11,10 +11,10 @@ const planWith = (filter: unknown): QueryPlan =>
 
 describe('describeFilter', () => {
   it.each([
-    [condition('customer_id', 'eq', 'C-1015'), 'customer = C-1015'],
+    [condition('customer_id', 'eq', '10033317'), 'customer = 10033317'],
     [condition('amount', 'gt', 500), 'amount > 500'],
     [condition('payment_status', 'in', ['FAILED', 'VOIDED']), 'payment status is one of FAILED, VOIDED'],
-    [condition('merchant_name', 'contains', 'harbor'), 'merchant name contains harbor'],
+    [condition('merchant_name', 'contains', 'roger'), 'merchant name contains roger'],
     [condition('opened_at', 'between', { relative: 'this_month' }), 'opened this month'],
     [condition('transaction_date', 'between', { last_n_days: 7 }), 'date in the last 7 days'],
     [condition('transaction_date', 'between', ['2026-10-01', '2026-10-15']), 'date 2026-10-01 – 2026-10-15'],
@@ -51,9 +51,9 @@ describe('filterChips', () => {
       kind: 'group',
       logic: 'and',
       negate: false,
-      children: [condition('customer_id', 'eq', 'C-1015'), condition('opened_at', 'between', { relative: 'this_month' })],
+      children: [condition('customer_id', 'eq', '10033317'), condition('opened_at', 'between', { relative: 'this_month' })],
     })
-    expect(filterChips(plan)).toEqual(['customer = C-1015', 'opened this month'])
+    expect(filterChips(plan)).toEqual(['customer = 10033317', 'opened this month'])
   })
 
   it('keeps an OR as one chip and handles no filter', () => {

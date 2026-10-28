@@ -81,10 +81,10 @@ describe('chat panel', () => {
     const api = fakeApi()
     renderApp(api)
 
-    await userEvent.type(questionBox(), 'Transactions for C-1015{Shift>}{Enter}{/Shift}this month')
+    await userEvent.type(questionBox(), 'Transactions for 10033317{Shift>}{Enter}{/Shift}this month')
     expect(api.chat).not.toHaveBeenCalled()
     await userEvent.type(questionBox(), '{Enter}')
-    await waitFor(() => expect(api.chat).toHaveBeenCalledWith('Transactions for C-1015\nthis month', undefined))
+    await waitFor(() => expect(api.chat).toHaveBeenCalledWith('Transactions for 10033317\nthis month', undefined))
 
     await userEvent.type(questionBox(), 'Now their chargebacks{Enter}')
     await waitFor(() => expect(api.chat).toHaveBeenLastCalledWith('Now their chargebacks', 'session-1'))
@@ -140,13 +140,13 @@ describe('chat panel', () => {
   it('keeps the conversation across a reload of the page', async () => {
     const api = fakeApi()
     const firstRender = renderApp(api)
-    await userEvent.type(questionBox(), 'Transactions for C-1015{Enter}')
+    await userEvent.type(questionBox(), 'Transactions for 10033317{Enter}')
     await waitFor(() => expect(messages()).toHaveLength(2))
     firstRender.unmount()
 
     renderApp(api)
     expect(messages()).toEqual([
-      ['user', 'Transactions for C-1015'],
+      ['user', 'Transactions for 10033317'],
       ['assistant', 'Here you go.'],
     ])
     await userEvent.type(questionBox(), 'And their refunds?{Enter}')

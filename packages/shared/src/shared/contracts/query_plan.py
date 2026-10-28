@@ -5,7 +5,6 @@ session memory keeps it so follow-up questions can narrow an earlier search, and
 caches it. Steps are typed and reject unknown keys, so result rows can't be stored in one.
 """
 
-import uuid
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -13,6 +12,7 @@ from pydantic import Field
 from shared.contracts.contract_model import ContractModel
 from shared.contracts.filter_expression import FilterNode
 from shared.contracts.filterable_field_description import SearchableEntity
+from shared.contracts.identifiers import TransactionId
 from shared.contracts.search_request import SortSpec
 
 MAX_PLAN_STEPS = 10
@@ -37,7 +37,7 @@ class SearchStep(ContractModel):
 
 class DetailStep(ContractModel):
     tool_name: Literal["get_transaction_detail"]
-    transaction_id: uuid.UUID
+    transaction_id: TransactionId
 
 
 QueryPlanStep = Annotated[SearchStep | DetailStep, Field(discriminator="tool_name")]

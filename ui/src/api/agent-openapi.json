@@ -109,6 +109,8 @@
             "type": "string"
           },
           "customer_id": {
+            "description": "Customer ID: 8 digits, e.g. 10001641",
+            "pattern": "^[0-9]{8}$",
             "title": "Customer Id",
             "type": "string"
           },
@@ -149,7 +151,8 @@
             "type": "string"
           },
           "transaction_id": {
-            "format": "uuid",
+            "description": "Transaction ID: 15 digits, e.g. 482910375610294",
+            "pattern": "^[0-9]{15}$",
             "title": "Transaction Id",
             "type": "string"
           }
@@ -268,7 +271,8 @@
             "type": "string"
           },
           "transaction_id": {
-            "format": "uuid",
+            "description": "Transaction ID: 15 digits, e.g. 482910375610294",
+            "pattern": "^[0-9]{15}$",
             "title": "Transaction Id",
             "type": "string"
           }
@@ -723,7 +727,8 @@
             "type": "object"
           },
           "payment_id": {
-            "format": "uuid",
+            "description": "Payment ID: 12 uppercase letters or digits, e.g. K7Q2M9XA4B1Z",
+            "pattern": "^[A-Z0-9]{12}$",
             "title": "Payment Id",
             "type": "string"
           },
@@ -1110,6 +1115,8 @@
             "type": "string"
           },
           "customer_id": {
+            "description": "Customer ID: 8 digits, e.g. 10001641",
+            "pattern": "^[0-9]{8}$",
             "title": "Customer Id",
             "type": "string"
           },
@@ -1139,7 +1146,8 @@
             "type": "string"
           },
           "transaction_id": {
-            "format": "uuid",
+            "description": "Transaction ID: 15 digits, e.g. 482910375610294",
+            "pattern": "^[0-9]{15}$",
             "title": "Transaction Id",
             "type": "string"
           },
@@ -1198,6 +1206,8 @@
             "type": "string"
           },
           "customer_id": {
+            "description": "Customer ID: 8 digits, e.g. 10001641",
+            "pattern": "^[0-9]{8}$",
             "title": "Customer Id",
             "type": "string"
           },
@@ -1232,7 +1242,8 @@
             "title": "Merchant Name"
           },
           "payment_id": {
-            "format": "uuid",
+            "description": "Payment ID: 12 uppercase letters or digits, e.g. K7Q2M9XA4B1Z",
+            "pattern": "^[A-Z0-9]{12}$",
             "title": "Payment Id",
             "type": "string"
           },
@@ -1250,7 +1261,8 @@
             "type": "string"
           },
           "transaction_id": {
-            "format": "uuid",
+            "description": "Transaction ID: 15 digits, e.g. 482910375610294",
+            "pattern": "^[0-9]{15}$",
             "title": "Transaction Id",
             "type": "string"
           },
@@ -1559,7 +1571,7 @@
             "name": "transaction_id",
             "required": true,
             "schema": {
-              "format": "uuid",
+              "pattern": "^[0-9]{15}$",
               "title": "Transaction Id",
               "type": "string"
             }

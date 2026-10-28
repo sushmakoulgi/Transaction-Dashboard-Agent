@@ -20,7 +20,7 @@ from agent_service.llm.claude_client import (
 from agent_service.settings import ClaudeSettings
 
 SYSTEM = [{"type": "text", "text": "You answer questions about transactions."}]
-MESSAGES = [{"role": "user", "content": "Transactions for C-1004?"}]
+MESSAGES = [{"role": "user", "content": "Transactions for 10001641?"}]
 TOOLS = [
     {
         "name": "search_transactions",
@@ -166,11 +166,11 @@ async def test_tool_use_reply_keeps_every_content_block_unmodified() -> None:
 
 async def test_final_answer_reply() -> None:
     transport = responding(
-        200, message_body("end_turn", [{"type": "text", "text": "C-1004 has 7 transactions."}])
+        200, message_body("end_turn", [{"type": "text", "text": "10001641 has 7 transactions."}])
     )
     reply = await create(client_with(transport))
     assert not reply.wants_tools
-    assert reply.text == "C-1004 has 7 transactions."
+    assert reply.text == "10001641 has 7 transactions."
 
 
 async def test_refusal_is_raised_with_its_category() -> None:

@@ -26,15 +26,15 @@ const PLAN: QueryPlan = {
 
 function transaction(number: number): TransactionSummary {
   return {
-    transaction_id: `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`,
-    customer_id: `C-10${number}`,
+    transaction_id: String(400000000000000 + number),
+    customer_id: String(10001640 + number),
     amount: '1234.50',
     currency: 'USD',
     transaction_type: 'PURCHASE',
     transaction_date: '2026-10-15T13:30:00Z',
-    merchant_name: 'Blue Harbor Travel',
-    merchant_category: 'TRAVEL',
-    payment_id: `10000000-0000-4000-8000-${String(number).padStart(12, '0')}`,
+    merchant_name: 'Rogers',
+    merchant_category: 'WIRELESS',
+    payment_id: `PAY${String(number).padStart(9, '0')}`,
     payment_status: 'CAPTURED',
     payment_method: 'CARD',
     card_brand: 'VISA',
@@ -109,9 +109,9 @@ describe('results panel', () => {
     expect(bodyRows()).toHaveLength(25)
     expect(cellsOf(bodyRows()[0])).toEqual([
       'Oct 15, 2026, 09:30 AM', // 13:30 UTC shown in New York time
-      'C-101',
+      '10001641',
       '$1,234.50',
-      'Blue Harbor Travel',
+      'Rogers',
       'CAPTURED',
       'CARD',
       'VISA',
@@ -132,7 +132,7 @@ describe('results panel', () => {
     await waitFor(() => expect(screen.getByText('Page 2 of 2 · 40 matches')).toBeTruthy())
     expect(api.executePlan).toHaveBeenCalledWith(PLAN, 2, 25)
     await waitFor(() => expect(bodyRows()).toHaveLength(15))
-    expect(cellsOf(bodyRows()[0])[1]).toBe('C-1026')
+    expect(cellsOf(bodyRows()[0])[1]).toBe('10001666')
     expect(screen.getByRole('button', { name: 'Next ›' })).toHaveProperty('disabled', true)
     expect(api.chat).not.toHaveBeenCalled()
   })
@@ -169,8 +169,8 @@ describe('results panel', () => {
   it('shows chargeback columns for chargeback results', () => {
     const chargeback: ChargebackSummary = {
       chargeback_id: '20000000-0000-4000-8000-000000000001',
-      transaction_id: '00000000-0000-4000-8000-000000000001',
-      customer_id: 'C-1015',
+      transaction_id: '400000000000001',
+      customer_id: '10033317',
       reason_code: '10.4',
       chargeback_status: 'OPEN',
       chargeback_amount: '99.00',
@@ -188,7 +188,7 @@ describe('results panel', () => {
 
     expect(cellsOf(bodyRows()[0])).toEqual([
       'Oct 20, 2026, 12:00 PM',
-      'C-1015',
+      '10033317',
       '€99.00',
       'OPEN',
       '10.4',
@@ -238,16 +238,16 @@ describe('results panel', () => {
 
 describe('summary bar and detail popup', () => {
   const detail = {
-    transaction_id: '00000000-0000-4000-8000-000000000001',
-    customer_id: 'C-101',
+    transaction_id: '400000000000001',
+    customer_id: '10001641',
     amount: '1234.50',
     currency: 'USD',
     transaction_type: 'PURCHASE',
     transaction_date: '2026-10-15T13:30:00Z',
-    merchant_details: { merchant_name: 'Blue Harbor Travel', merchant_category: 'TRAVEL', country: 'US' },
+    merchant_details: { merchant_name: 'Rogers', merchant_category: 'WIRELESS', country: 'US' },
     metadata: { channel: 'WEB' },
     payment: {
-      payment_id: '10000000-0000-4000-8000-000000000001',
+      payment_id: 'PAY000000001',
       payment_method: 'CARD',
       payment_status: 'CAPTURED',
       authorized_amount: '1234.50',
@@ -311,7 +311,7 @@ describe('summary bar and detail popup', () => {
     await userEvent.click(bodyRows()[0])
 
     const dialog = await screen.findByRole('dialog', { name: 'Transaction details' })
-    expect(api.getTransactionDetail).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001')
+    expect(api.getTransactionDetail).toHaveBeenCalledWith('400000000000001')
     await within(dialog).findByText('Refunds (1)') // details loaded
     expect(dialog.querySelector('.detail-hero__amount')?.textContent).toBe('$1,234.50')
     expect(within(dialog).getByText('VISA •••• 4242')).toBeTruthy()
@@ -334,7 +334,7 @@ describe('summary bar and detail popup', () => {
 
     bodyRows()[1].focus()
     await userEvent.keyboard('{Enter}')
-    expect(api.getTransactionDetail).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000002')
+    expect(api.getTransactionDetail).toHaveBeenCalledWith('400000000000002')
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).toBeNull()
 

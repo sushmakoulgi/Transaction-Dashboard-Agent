@@ -4,7 +4,6 @@ Requires the seeded docker-compose Postgres. The seed is relative to today, so t
 use the real clock; a clock set to last year checks the current-year scope.
 """
 
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -195,7 +194,7 @@ async def test_detail_without_refunds_or_chargeback(readonly_database: ReadOnlyD
 async def test_unknown_transaction_is_not_found(readonly_database: ReadOnlyDatabase) -> None:
     service = build_detail_service(readonly_database, SystemClock())
     with pytest.raises(TransactionNotFoundError):
-        await service.get_transaction_detail(uuid.uuid4())
+        await service.get_transaction_detail("999999999999999")
 
 
 async def test_transaction_outside_the_current_year_is_not_found(
