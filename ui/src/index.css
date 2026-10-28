@@ -1,7 +1,30 @@
 :root {
+  --color-primary: #4f46e5;
+  --color-primary-strong: #4338ca;
+  --color-primary-soft: #eef2ff;
+  --color-accent: #0ea5e9;
+  --color-ink: #0f172a;
+  --color-text: #1e293b;
+  --color-muted: #64748b;
+  --color-border: #e2e8f0;
+  --color-surface: #ffffff;
+  --color-page: #f1f5f9;
+  --color-success: #047857;
+  --color-success-soft: #d1fae5;
+  --color-warning: #b45309;
+  --color-warning-soft: #fef3c7;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fee2e2;
+  --color-info: #0369a1;
+  --color-info-soft: #e0f2fe;
+  --color-neutral: #475569;
+  --color-neutral-soft: #e2e8f0;
+  --gradient-brand: linear-gradient(120deg, #312e81 0%, #4f46e5 45%, #0ea5e9 100%);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 16px rgba(15, 23, 42, 0.06);
+
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  color: #1f2933;
-  background: #f5f7fa;
+  color: var(--color-text);
+  background: var(--color-page);
 }
 
 body {
@@ -9,75 +32,162 @@ body {
 }
 
 .app {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
 }
 
+/* Full-width brand band across the top. */
 .app-header {
+  background: var(--gradient-brand);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(49, 46, 129, 0.35);
+}
+
+.app-header__inner {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 20px 32px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
+  gap: 24px;
+}
+
+.app-header__brand {
+  display: flex;
+  align-items: center;
   gap: 16px;
+}
+
+.app-header__logo {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 1.6rem;
 }
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.app-header__subtitle {
+  margin: 2px 0 0;
+  font-size: 0.95rem;
+  opacity: 0.85;
 }
 
 .connection-status {
-  font-size: 0.875rem;
-  padding: 4px 10px;
+  font-size: 0.85rem;
+  padding: 6px 12px;
   border-radius: 999px;
-  background: #e4e7eb;
+  background: rgba(255, 255, 255, 0.18);
+  white-space: nowrap;
 }
 
-.connection-status--connected {
-  background: #d1fae5;
-  color: #065f46;
+.connection-status::before {
+  content: '●';
+  margin-right: 6px;
 }
 
-.connection-status--unreachable {
-  background: #fee2e2;
-  color: #991b1b;
+.connection-status--connected::before {
+  color: #6ee7b7;
 }
 
-.placeholder {
-  color: #616e7c;
+.connection-status--unreachable::before {
+  color: #fca5a5;
 }
 
-.app {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  box-sizing: border-box;
+.connection-status--checking::before {
+  color: #fde68a;
 }
 
 .app-layout {
   flex: 1;
   min-height: 0;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 20px 32px;
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(320px, 2fr) 3fr;
-  gap: 16px;
-  margin-top: 16px;
+  gap: 20px;
 }
 
 .results-panel {
-  background: #ffffff;
-  border: 1px solid #e4e7eb;
-  border-radius: 10px;
-  padding: 12px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  padding: 14px 18px;
   overflow: auto;
 }
 
-.results-panel h2 {
-  margin: 0 0 8px;
+.results-panel > h2 {
+  margin: 0 0 10px;
   font-size: 1rem;
+  color: var(--color-ink);
 }
 
-@media (max-width: 800px) {
+.placeholder,
+.muted {
+  color: var(--color-muted);
+}
+
+button {
+  font: inherit;
+}
+
+/* Status badges used in tables and the detail popup. */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge--success {
+  color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.badge--warning {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.badge--danger {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.badge--info {
+  color: var(--color-info);
+  background: var(--color-info-soft);
+}
+
+.badge--neutral {
+  color: var(--color-neutral);
+  background: var(--color-neutral-soft);
+}
+
+@media (max-width: 900px) {
   .app-layout {
     grid-template-columns: 1fr;
+    padding: 16px;
+  }
+
+  .app-header__inner {
+    padding: 16px;
+    flex-wrap: wrap;
   }
 }

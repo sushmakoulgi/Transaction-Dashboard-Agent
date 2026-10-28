@@ -32,7 +32,3 @@ export function formatMoney(amount: string | null | undefined, currency: string 
 export function formatCode(value: string | null | undefined): string {
   return value ? value.replaceAll('_', ' ') : '—'
 }
-
-export function formatYesNo(value: boolean): string {
-  return value ? 'Yes' : 'No'
-}

@@ -778,7 +778,7 @@ ui/
 ├── src/App.tsx                # shell + live agent connection status (P1d-1)
 ├── src/features/chat/         # ChatPanel, MessageList, ChatInput, useChatSession, chatStorage, describeAgentError
 ├── src/features/results/      # ResultsPanel, ResultsTable (TanStack Table v9), Pager, usePlanResults, planSorting
-└── src/features/detail/       # P2c: TransactionDetailDrawer, ChargebackTimeline
+└── src/features/detail/       # TransactionDetailDialog: popup with payment, refunds, chargeback timeline
 ```
 - **Stack:** React 19, Vite 8, TypeScript 7 (`strict`), TanStack Query, Vitest, oxlint. Run with `make ui-install`, `make ui-dev` (http://localhost:5173, the agent's default CORS origin) and `make ui-test` (typecheck + lint + tests).
 - **Types are generated, not hand-written:**
@@ -789,6 +789,17 @@ ui/
   - It adds `Authorization: Bearer` only when a token is configured.
   - Any non-2xx response becomes `AgentApiError(status, errorCode, message, issues)`, from the shared `ErrorResponse`, or `HTTP_ERROR` / `NETWORK_ERROR`.
   - `checkHealth()` never throws.
+- **Look and feel (2026-10-28):**
+  - **Theme:** CSS variables in `index.css` define one indigo/sky palette (`--gradient-brand`, `--color-*`, `--shadow-card`).
+  - **Header:** a full-width gradient band with a larger "Transaction Dashboard" title, a subtitle, and the agent connection status as a pill (green / amber / red dot).
+  - **Chat:** gradient bubbles for user questions and tinted ones for replies; red-edged errors; styled buttons and inputs.
+  - **Summary bar above the grid** (`ResultsSummary`): the entity, a large match count, the agent's reply, "page X of Y · sorted by …", and **filter chips**. `describePlan.ts` turns the plan's filter into text: one chip per top-level AND condition, readable labels and operators, relative dates ("opened this month"), presence ("has refund"), and OR / NOT / nested groups. The bar is indigo for transactions and red/orange for chargebacks.
+  - **Status badges** (`StatusBadge`): green for captured / completed / won; amber for authorized / pending / open / under review; red for failed / lost / pre-arbitration; blue for evidence submitted / representment; grey for voided / accepted. Refund "Yes" uses the blue badge.
+- **Detail popup (P2c):** clicking a row (or Enter / Space on a focused row) opens `TransactionDetailDialog` for that row's `transaction_id`; a chargeback row opens its disputed transaction.
+  - It loads `GET /api/transactions/{id}` through TanStack Query, cached for 60 s.
+  - It shows a headline amount with status badges, then Overview (date, customer, type, merchant, category, country, channel), Payment (ID, method, status, card brand and last 4, authorized / captured amounts and times), Refunds (a table), and Chargeback (status, reason, amount, opened, network, case, plus an ordered **event timeline**).
+  - It's a modal (`role="dialog"`, `aria-modal`) with focus on Close. Escape, the × button or a click on the backdrop closes it. Load errors use `describeAgentError`.
+  - **Tests** cover the summary content and its position before the grid, badge colours, opening by click and by keyboard, the detail content (card, refunds, reason, timeline order), focus, the three ways to close, and the error state.
 - **Token:** `VITE_AGENT_API_TOKEN` must equal `AGENT_API_TOKEN` while `AUTH_ENABLED`. It is bundled into the page, so this setup is for local, single-user use only.
 - **Results table (P1d-3):**
   - **`ResultsPanel`** is keyed by the chat's `answerSequence`, so every answer starts again at page 1 with its own plan.
@@ -965,8 +976,8 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 ### Phase 2c — Drill-down
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
-| P2c-1 | `TransactionDetailDrawer` + `ChargebackTimeline` (row click → `/transactions/{id}`) | M | P1d-3 | Shows payment, refunds, chargeback and ordered events |
-| P2c-2 | Drill-down from the chargeback results table (via `transaction_id`) | S | P2c-1 | Works for both entity tables |
+| P2c-1 | `TransactionDetailDrawer` + `ChargebackTimeline` (row click → `/transactions/{id}`) | M | P1d-3 | Shows payment, refunds, chargeback and ordered events ✅ (as a popup dialog, 2026-10-28) |
+| P2c-2 | Drill-down from the chargeback results table (via `transaction_id`) | S | P2c-1 | Works for both entity tables ✅ (as a popup dialog, 2026-10-28) |
 | P2c-3 | E2E for drill-down | S | P2c-2 | Passes |
 
 ### Phase 3 — Hardening (optional)

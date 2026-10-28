@@ -25,10 +25,25 @@ function App({ api = agentApi }: AppProps) {
   return (
     <main className="app">
       <header className="app-header">
-        <h1>Transaction Dashboard</h1>
-        <span className={`connection-status connection-status--${status}`}>
-          Agent service {status === 'checking' ? '…' : status} ({agentApiConfig.baseUrl})
-        </span>
+        <div className="app-header__inner">
+          <div className="app-header__brand">
+            <span className="app-header__logo" aria-hidden="true">
+              💳
+            </span>
+            <div>
+              <h1>Transaction Dashboard</h1>
+              <p className="app-header__subtitle">
+                Ask about payments, refunds and chargebacks in plain English
+              </p>
+            </div>
+          </div>
+          <span
+            className={`connection-status connection-status--${status}`}
+            title={agentApiConfig.baseUrl}
+          >
+            Agent service {status === 'checking' ? '…' : status}
+          </span>
+        </div>
       </header>
       <div className="app-layout">
         <ChatPanel session={session} />

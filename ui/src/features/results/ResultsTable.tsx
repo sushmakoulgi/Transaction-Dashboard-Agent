@@ -3,6 +3,7 @@ import { useTable, type ColumnDef } from '@tanstack/react-table'
 import type { ChargebackSummary, SearchableEntity, TransactionSummary } from '../../api/agentApiTypes'
 import {
   chargebackColumns,
+  DETAIL_TRANSACTION_ID_FIELD,
   resultTableFeatures,
   ROW_ID_FIELD,
   SORT_FIELD_BY_COLUMN,
@@ -17,9 +18,10 @@ interface ResultsTableProps {
   rows: ResultRow[]
   sort: SortSpec | null
   onSortBy: (field: string) => void
+  onOpenTransaction: (transactionId: string) => void
 }
 
-export function ResultsTable({ entity, rows, sort, onSortBy }: ResultsTableProps) {
+export function ResultsTable({ entity, rows, sort, onSortBy, onOpenTransaction }: ResultsTableProps) {
   const columns = (entity === 'transactions' ? transactionColumns : chargebackColumns) as ColumnDef<
     typeof resultTableFeatures,
     ResultRow
@@ -65,7 +67,20 @@ export function ResultsTable({ entity, rows, sort, onSortBy }: ResultsTableProps
         </thead>
         <tbody>
           {table.getRowModel().rows.map((row) => (
-            <tr key={row.id} data-row-id={row.id}>
+            <tr
+              key={row.id}
+              data-row-id={row.id}
+              className="results-table__row"
+              tabIndex={0}
+              aria-label={`Open details for transaction ${row.original[DETAIL_TRANSACTION_ID_FIELD]}`}
+              onClick={() => onOpenTransaction(row.original[DETAIL_TRANSACTION_ID_FIELD])}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onOpenTransaction(row.original[DETAIL_TRANSACTION_ID_FIELD])
+                }
+              }}
+            >
               {row.getAllCells().map((cell) => (
                 <td key={cell.id}>
                   <table.FlexRender cell={cell} />
