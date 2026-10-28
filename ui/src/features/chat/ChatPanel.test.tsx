@@ -77,6 +77,35 @@ describe('chat panel', () => {
     expect(api.executePlan).not.toHaveBeenCalled() // the answer's own page is shown as-is
   })
 
+  it("renders Claude's Markdown: bold, lists and tables, but never images", async () => {
+    const reply = [
+      'I found **4 Rogers transactions**.',
+      '',
+      '- two are *open*',
+      '- two were lost',
+      '',
+      '| Date | Customer |',
+      '|---|---|',
+      '| 2026-10-21 | 10080831 |',
+      '',
+      '![tracker](https://example.com/pixel.png)',
+    ].join('\n')
+    renderApp(fakeApi({ chat: vi.fn(async () => answer(reply)) }))
+
+    await userEvent.type(questionBox(), 'Rogers chargebacks{Enter}')
+
+    const bubble = await waitFor(() => {
+      const node = document.querySelector('.message--assistant:not(.message--pending)')
+      expect(node).toBeTruthy()
+      return node as HTMLElement
+    })
+    expect(within(bubble).getByText('4 Rogers transactions').tagName).toBe('STRONG')
+    expect(within(bubble).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(bubble).getByRole('cell', { name: '10080831' })).toBeTruthy()
+    expect(bubble.querySelector('img')).toBeNull()
+    expect(bubble.textContent).not.toContain('**')
+  })
+
   it('sends on Enter, keeps Shift+Enter for new lines, and continues the session', async () => {
     const api = fakeApi()
     renderApp(api)

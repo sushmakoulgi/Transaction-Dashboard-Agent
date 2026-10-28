@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react'
 import type { AgentApiClient } from '../../api/agentApiClient'
 import type { ChatResponse, PlanPageResponse, QueryPlan } from '../../api/agentApiTypes'
 import { describeAgentError } from '../chat/describeAgentError'
+import { ReplyMarkdown } from '../chat/ReplyMarkdown'
 import { TransactionDetailDialog } from '../detail/TransactionDetailDialog'
 import { Pager } from './Pager'
 import { nextSort, sortOfPlan, withSort, type SortSpec } from './planSorting'
@@ -37,7 +38,11 @@ export function ResultsPanel({ api, answer }: ResultsPanelProps) {
           <p className="placeholder">
             {answer ? 'This answer has no table of results.' : 'Results from your questions will appear here.'}
           </p>
-          {answer && <p className="results-summary__reply">{answer.reply}</p>}
+          {answer && (
+            <div className="results-summary__reply">
+              <ReplyMarkdown text={answer.reply} />
+            </div>
+          )}
         </div>
       )}
     </section>

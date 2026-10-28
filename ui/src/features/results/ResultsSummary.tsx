@@ -1,6 +1,7 @@
 import type { QueryPlan, SearchableEntity } from '../../api/agentApiTypes'
 import { describeSort, filterChips } from './describePlan'
 import type { SortSpec } from './planSorting'
+import { replySummary } from './replySummary'
 
 interface ResultsSummaryProps {
   entity: SearchableEntity
@@ -20,6 +21,7 @@ const ENTITY_TITLES: Record<SearchableEntity, string> = {
 // The bar below the results table and pager: what was searched and how much matched.
 export function ResultsSummary({ entity, totalCount, page, totalPages, reply, plan, sort }: ResultsSummaryProps) {
   const chips = filterChips(plan)
+  const shortReply = replySummary(reply)
   return (
     <div className={`results-summary results-summary--${entity}`} aria-label="Results summary">
       <div className="results-summary__headline">
@@ -32,7 +34,7 @@ export function ResultsSummary({ entity, totalCount, page, totalPages, reply, pl
           Page {page} of {Math.max(totalPages, 1)} · sorted by {describeSort(sort)}
         </span>
       </div>
-      {reply && <p className="results-summary__reply">{reply}</p>}
+      {shortReply && <p className="results-summary__reply">{shortReply}</p>}
       <ul className="filter-chips" aria-label="Filters">
         {chips.length === 0 ? (
           <li className="filter-chip filter-chip--none">No filters (all of this year)</li>

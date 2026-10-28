@@ -1,0 +1,69 @@
+.reply-markdown {
+  white-space: normal;
+  line-height: 1.45;
+}
+
+.reply-markdown > :first-child {
+  margin-top: 0;
+}
+
+.reply-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.reply-markdown p,
+.reply-markdown ul,
+.reply-markdown ol {
+  margin: 0 0 8px;
+}
+
+.reply-markdown ul,
+.reply-markdown ol {
+  padding-left: 20px;
+}
+
+.reply-markdown li + li {
+  margin-top: 2px;
+}
+
+.reply-markdown h1,
+.reply-markdown h2,
+.reply-markdown h3,
+.reply-markdown h4 {
+  margin: 10px 0 6px;
+  font-size: 1rem;
+}
+
+.reply-markdown strong {
+  color: var(--color-ink);
+}
+
+.reply-markdown code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--color-surface);
+  font-size: 0.875em;
+}
+
+.reply-markdown__table {
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+
+.reply-markdown table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  background: var(--color-surface);
+}
+
+.reply-markdown th,
+.reply-markdown td {
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reply-markdown th {
+  background: var(--color-neutral-soft);
+}

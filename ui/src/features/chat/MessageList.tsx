@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 
 import type { ChatMessage } from './chatTypes'
 import { EXAMPLE_QUESTIONS } from './exampleQuestions'
+import { ReplyMarkdown } from './ReplyMarkdown'
 
 interface MessageListProps {
   messages: ChatMessage[]
@@ -37,7 +38,7 @@ export function MessageList({ messages, isWaitingForAnswer, onPickExample }: Mes
     <div className="message-list" aria-live="polite">
       {messages.map((message) => (
         <div key={message.id} className={`message message--${message.role}`} data-role={message.role}>
-          <p>{message.text}</p>
+          {message.role === 'assistant' ? <ReplyMarkdown text={message.text} /> : <p>{message.text}</p>}
           {message.issues && (
             <ul className="message-issues">
               {message.issues.map((issue) => (
