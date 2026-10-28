@@ -21,7 +21,7 @@
 .results-table th,
 .results-table td {
   text-align: left;
-  padding: 8px 10px;
+  padding: 8px;
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
 }

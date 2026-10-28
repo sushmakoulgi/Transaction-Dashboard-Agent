@@ -104,17 +104,16 @@ describe('results panel', () => {
     renderPanel(api, chatAnswer(transactionPage(1, 25, 40)))
 
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent?.replace(/[▲▼↕]/g, '').trim())).toEqual([
-      'Date', 'Customer', 'Amount', 'Merchant', 'Payment', 'Method', 'Card', 'Refund', 'Chargeback',
+      'Date', 'Customer', 'Amount', 'Merchant', 'Payment', 'Paid with', 'Refund', 'Chargeback',
     ])
     expect(bodyRows()).toHaveLength(25)
     expect(cellsOf(bodyRows()[0])).toEqual([
-      'Oct 15, 2026, 09:30 AM', // 13:30 UTC shown in New York time
+      'Oct 15, 09:30 AM', // 13:30 UTC shown in New York time; the year is in the tooltip
       '10001641',
       '$1,234.50',
       'Rogers',
       'CAPTURED',
-      'CARD',
-      'VISA',
+      'Visa',
       'No',
       'UNDER REVIEW',
     ])
@@ -187,14 +186,14 @@ describe('results panel', () => {
     renderPanel(servesTransactionPages(0), chatAnswer(page))
 
     expect(cellsOf(bodyRows()[0])).toEqual([
-      'Oct 20, 2026, 12:00 PM',
+      'Oct 20, 12:00 PM',
       '10033317',
       '€99.00',
       'OPEN',
       '10.4',
       'VISA',
       'EVIDENCE REQUESTED',
-      'Oct 01, 2026, 12:00 PM',
+      'Oct 01, 12:00 PM',
     ])
     expect(screen.getByText('Page 1 of 1 · 1 match')).toBeTruthy()
   })

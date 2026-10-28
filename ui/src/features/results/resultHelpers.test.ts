@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { QueryPlan } from '../../api/agentApiTypes'
-import { formatCode, formatDateTime, formatMoney } from './formatters'
+import { formatCode, formatCompactDateTime, formatDateTime, formatMoney, formatPaidWith } from './formatters'
 import { nextSort, sortOfPlan, withSort } from './planSorting'
 
 const DETAIL_STEP = { tool_name: 'get_transaction_detail' as const, transaction_id: '400000000000001' }
@@ -52,6 +52,19 @@ describe('formatters', () => {
     expect(formatDateTime('2026-07-15T13:00:00Z')).toBe('Jul 15, 2026, 09:00 AM') // EDT
     expect(formatDateTime(null)).toBe('—')
     expect(formatDateTime('not a date')).toBe('not a date')
+  })
+
+  it('leaves the year out of compact table dates', () => {
+    expect(formatCompactDateTime('2026-12-15T14:00:00Z')).toBe('Dec 15, 09:00 AM')
+    expect(formatCompactDateTime(null)).toBe('—')
+  })
+
+  it('shows the card brand for card payments, otherwise the method', () => {
+    expect(formatPaidWith('CARD', 'MASTERCARD')).toBe('Mastercard')
+    expect(formatPaidWith('CARD', null)).toBe('Card')
+    expect(formatPaidWith('WALLET', 'AMEX')).toBe('Wallet')
+    expect(formatPaidWith('ACH', null)).toBe('ACH')
+    expect(formatPaidWith(null, null)).toBe('—')
   })
 
   it('makes codes readable', () => {

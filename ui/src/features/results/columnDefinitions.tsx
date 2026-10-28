@@ -3,10 +3,15 @@
 import { createColumnHelper, tableFeatures } from '@tanstack/react-table'
 
 import type { ChargebackSummary, SearchableEntity, TransactionSummary } from '../../api/agentApiTypes'
-import { formatCode, formatDateTime, formatMoney } from './formatters'
+import { formatCode, formatCompactDateTime, formatDateTime, formatMoney, formatPaidWith } from './formatters'
 import { StatusBadge, YesNoBadge } from './StatusBadge'
 
 export const resultTableFeatures = tableFeatures({})
+
+// Compact in the cell; the full date with the year is in the tooltip.
+function DateTimeCell({ value }: { value: string | null | undefined }) {
+  return <span title={formatDateTime(value)}>{formatCompactDateTime(value)}</span>
+}
 
 const transactionColumn = createColumnHelper<typeof resultTableFeatures, TransactionSummary>()
 const chargebackColumn = createColumnHelper<typeof resultTableFeatures, ChargebackSummary>()
@@ -14,7 +19,7 @@ const chargebackColumn = createColumnHelper<typeof resultTableFeatures, Chargeba
 export const transactionColumns = transactionColumn.columns([
   transactionColumn.accessor('transaction_date', {
     header: 'Date',
-    cell: (info) => formatDateTime(info.getValue()),
+    cell: (info) => <DateTimeCell value={info.getValue()} />,
   }),
   transactionColumn.accessor('customer_id', { header: 'Customer' }),
   transactionColumn.accessor('amount', {
@@ -23,8 +28,10 @@ export const transactionColumns = transactionColumn.columns([
   }),
   transactionColumn.accessor('merchant_name', { header: 'Merchant', cell: (info) => info.getValue() ?? '—' }),
   transactionColumn.accessor('payment_status', { header: 'Payment', cell: (info) => <StatusBadge status={info.getValue()} /> }),
-  transactionColumn.accessor('payment_method', { header: 'Method', cell: (info) => formatCode(info.getValue()) }),
-  transactionColumn.accessor('card_brand', { header: 'Card', cell: (info) => formatCode(info.getValue()) }),
+  transactionColumn.accessor('payment_method', {
+    header: 'Paid with',
+    cell: (info) => formatPaidWith(info.getValue(), info.row.original.card_brand),
+  }),
   transactionColumn.accessor('has_refund', { header: 'Refund', cell: (info) => <YesNoBadge value={info.getValue()} /> }),
   transactionColumn.accessor('chargeback_status', {
     header: 'Chargeback',
@@ -33,7 +40,7 @@ export const transactionColumns = transactionColumn.columns([
 ])
 
 export const chargebackColumns = chargebackColumn.columns([
-  chargebackColumn.accessor('opened_at', { header: 'Opened', cell: (info) => formatDateTime(info.getValue()) }),
+  chargebackColumn.accessor('opened_at', { header: 'Opened', cell: (info) => <DateTimeCell value={info.getValue()} /> }),
   chargebackColumn.accessor('customer_id', { header: 'Customer' }),
   chargebackColumn.accessor('chargeback_amount', {
     header: 'Amount',
@@ -48,7 +55,7 @@ export const chargebackColumns = chargebackColumn.columns([
   }),
   chargebackColumn.accessor('transaction_date', {
     header: 'Transaction date',
-    cell: (info) => formatDateTime(info.getValue()),
+    cell: (info) => <DateTimeCell value={info.getValue()} />,
   }),
 ])
 
