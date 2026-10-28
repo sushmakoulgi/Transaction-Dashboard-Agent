@@ -93,7 +93,7 @@ Transaction_Dashboard/
 │       │   ├── query_plan_recorder.py  # successful search/detail calls → QueryPlan; last page for the UI
 │       │   └── tool_result_compactor.py  # what Claude sees of each tool result
 │       ├── plan_execution/
-│       │   └── plan_executor.py      # runs a QueryPlan against Transaction Service
+│       │   └── plan_executor.py      # PlanExecutor: last search of a plan → any page, no LLM
 │       └── plan_resolution/          # Phase 2
 │           ├── plan_resolver.py      # PlanResolver Protocol + ChainedPlanResolver
 │           ├── query_template_extractor.py
@@ -682,8 +682,13 @@ class SessionStore(Protocol):
   - End to end over real HTTP, with both servers under uvicorn: the 5 tools are discovered, a search goes through the whole chain, validation problems come back, and a wrong token fails at startup.
 
 ### 6.6 Plan executor (`plan_execution/plan_executor.py`)
-- `PlanExecutor.execute(plan, page, page_size)` runs the steps in order against the Transaction Service over HTTP (through the shared `TransactionServiceClient`). Page and page_size are applied to the last search step.
-- Used by `/plans/execute` for paging, and in Phase 2 for cache or RAG hits.
+- **`PlanExecutor(transaction_service).execute(plan, page, page_size) -> PlanResultPage(entity, result)`** re-runs the plan's **last search** for any page, straight against the Transaction Service through the shared `TransactionServiceClient`. No Claude call and no MCP hop, so UI paging is free and always shows the same query.
+  - Only the last search drives the table. Detail steps aren't re-run; the UI opens details through `GET /transactions/{id}`.
+  - It rebuilds a `SearchRequest(filter, sort, page, page_size)` from the `SearchStep`, so every request limit applies.
+  - **Errors:** `PlanHasNoSearchError` (e.g. a detail-only plan), `InvalidPageRequestError` (page < 1, page_size outside 1–100; no call is made), and the client's `TransactionServiceError` / `TransactionServiceUnavailableError`.
+  - It depends on a small `TransactionSearchClient` Protocol, implemented by `TransactionServiceClient`.
+- **Used by** `/plans/execute` (P1c-7) for paging, and in Phase 2 for cache / RAG hits.
+- **Verified end to end:** a `QueryAgent` (scripted Claude, real MCP tools → real Transaction Service → Postgres) answers a question. Re-running its recorded plan returns a page 1 **identical** to the agent's `result_page`, and pages 1–3 together cover all 15 matching transactions without duplicates.
 
 ## 7. Phase 2 — Plan resolution
 
@@ -853,7 +858,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1c-3 | `SessionEntry`, `SessionStore` Protocol + `InMemorySessionStore` (question + plan only, last-N limit, idle TTL) | S | P0-1 | A test checks that no tool result, result row or reply is persisted after a turn. Expiry works ✅ |
 | P1c-4 | System prompt (stable prefix) + date as a mid-conversation system message | S | P1c-1 | Prompt-cache reads > 0 on the second turn ✅ (the live cache-read check runs with P1c-9) |
 | P1c-5 | `QueryAgent` loop: parallel tool calls, compact tool results, error tool_results, max iterations | L | P1c-1..4 | Scripted tests: success, validation-retry, iteration cap ✅ |
-| P1c-6 | `QueryPlanRecorder` + `PlanExecutor` | M | P1c-5 | Re-running a recorded plan returns the same page 1 as the agent did |
+| P1c-6 | `QueryPlanRecorder` + `PlanExecutor` | M | P1c-5 | Re-running a recorded plan returns the same page 1 as the agent did ✅ |
 | P1c-7 | Routes: `/chat`, `/plans/execute`, `/transactions/{id}`, sessions; CORS for UI | M | P1c-6 | OpenAPI. Session ID created when absent |
 | P1c-9 | Live natural-language eval (~25 prompts covering UC1–5, follow-ups, OR/NOT phrasing) | M | P1c-7 | ≥ 90% choose the correct tool and filters; `cache_read_input_tokens` > 0 from the second request |
 
