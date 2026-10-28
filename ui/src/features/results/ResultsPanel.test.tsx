@@ -285,7 +285,7 @@ describe('summary bar and detail popup', () => {
     return api
   }
 
-  it('shows the summary above the table: entity, count, reply and filter chips', () => {
+  it('shows the summary below the grid: entity, count, reply and filter chips', () => {
     renderPanel(servesTransactionPages(40), { ...chatAnswer(transactionPage(1, 25, 40)), reply: '40 transactions have chargebacks.' })
     const summary = screen.getByLabelText('Results summary')
     expect(within(summary).getByText('Transactions')).toBeTruthy()
@@ -293,8 +293,11 @@ describe('summary bar and detail popup', () => {
     expect(within(summary).getByText('40 transactions have chargebacks.')).toBeTruthy()
     expect(within(summary).getByText('has chargeback')).toBeTruthy()
     expect(within(summary).getByText(/sorted by newest first/)).toBeTruthy()
-    // the summary comes before the grid
-    expect(summary.compareDocumentPosition(screen.getByRole('table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // the summary comes after the grid and its pager
+    expect(summary.compareDocumentPosition(screen.getByRole('table')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    expect(
+      summary.compareDocumentPosition(screen.getByRole('button', { name: 'Next ›' })) & Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy()
   })
 
   it('colours statuses with badges', () => {

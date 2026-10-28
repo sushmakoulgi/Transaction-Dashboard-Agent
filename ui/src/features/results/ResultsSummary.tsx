@@ -17,7 +17,7 @@ const ENTITY_TITLES: Record<SearchableEntity, string> = {
   chargebacks: 'Chargebacks',
 }
 
-// The bar above the results table: what was searched and how much matched.
+// The bar below the results table and pager: what was searched and how much matched.
 export function ResultsSummary({ entity, totalCount, page, totalPages, reply, plan, sort }: ResultsSummaryProps) {
   const chips = filterChips(plan)
   return (

@@ -89,15 +89,6 @@ function PlanResults({ api, plan, reply, answerPage }: PlanResultsProps) {
   const sort = sortOverride ?? sortOfPlan(plan)
   return (
     <div className={results.isPlaceholderData ? 'results results--loading' : 'results'}>
-      <ResultsSummary
-        entity={entity}
-        totalCount={resultPage.total_count}
-        page={page}
-        totalPages={resultPage.total_pages}
-        reply={reply}
-        plan={effectivePlan}
-        sort={sort}
-      />
       {resultPage.items.length === 0 ? (
         <p className="placeholder">No {entity} matched.</p>
       ) : (
@@ -117,6 +108,15 @@ function PlanResults({ api, plan, reply, answerPage }: PlanResultsProps) {
         isLoading={results.isFetching}
         onPageChange={setPage}
         onPageSizeChange={changePageSize}
+      />
+      <ResultsSummary
+        entity={entity}
+        totalCount={resultPage.total_count}
+        page={page}
+        totalPages={resultPage.total_pages}
+        reply={reply}
+        plan={effectivePlan}
+        sort={sort}
       />
       {openTransactionId && (
         <TransactionDetailDialog
