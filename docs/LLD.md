@@ -776,7 +776,7 @@ ui/
 ├── src/config.ts              # VITE_AGENT_API_URL, VITE_AGENT_API_TOKEN (ui/.env.local)
 ├── src/agentApi.ts            # the app's client instance
 ├── src/App.tsx                # shell + live agent connection status (P1d-1)
-├── src/features/chat/         # P1d-2: ChatPanel, MessageList, ChatInput, useChatSession
+├── src/features/chat/         # ChatPanel, MessageList, ChatInput, useChatSession, chatStorage, describeAgentError
 ├── src/features/results/      # P1d-3: ResultsTable (TanStack Table), Pager, usePlanResults
 └── src/features/detail/       # P2c: TransactionDetailDrawer, ChargebackTimeline
 ```
@@ -792,8 +792,14 @@ ui/
 - **Token:** `VITE_AGENT_API_TOKEN` must equal `AGENT_API_TOKEN` while `AUTH_ENABLED`. It is bundled into the page, so this setup is for local, single-user use only.
 - The current `query_plan` is kept in state. `usePlanResults(plan, page)` calls `/api/plans/execute`, and TanStack Query caches pages (P1d-3).
 - Columns are defined by `result_entity` (a column registry per entity, mirroring the backend filter registry).
-- The `session_id` is stored in `sessionStorage` and sent with each chat request.
-- The on-screen chat transcript lives only in browser state. The server keeps user questions and their query plans only (§6.4).
+- **Chat panel (P1d-2):**
+  - **`useChatSession(api)`** holds the `session_id`, the transcript and the latest `ChatResponse`, whose plan and first page feed the results table. The `session_id` and transcript are saved to `sessionStorage` under `transaction-dashboard.chat`, so a reload in the same tab keeps the conversation; corrupt or blocked storage starts fresh. That is display state only: the server keeps user questions and their query plans only (§6.4).
+  - Sending is a TanStack Query mutation that continues the session.
+  - **`ChatInput`:** Enter sends and Shift+Enter adds a new line. It enforces the 2000-character limit with a counter, and is disabled while waiting.
+  - **`MessageList`:** auto-scrolls, shows a "Looking that up…" status, and offers one example question per use case before the first question.
+  - **"New conversation"** clears the transcript and makes a best-effort `DELETE /api/sessions/{id}`.
+  - **`describeAgentError`** turns errors into actionable text: agent unreachable, token mismatch (check `VITE_AGENT_API_TOKEN`), Claude busy, transaction data unavailable, and Claude credentials (shows the backend's "set ANTHROPIC_API_KEY" message). Validation issues are listed with their path and suggestions.
+  - **Tests** (jsdom + Testing Library, fake `AgentApiClient` passed into `<App api>`) cover: example click answering with the results summary, Enter vs Shift+Enter, session continuation, the waiting state blocking sends, three error kinds with issues, the conversation surviving a remount (reload), new conversation, and the connection status.
 - **Verified:** with all three services and the Vite dev server running, the page is served, its config points at the agent, and a browser-origin request to the agent's `/health` and the `/api/chat` CORS preflight (with `Authorization`) are allowed.
 
 ## 9. Configuration (`.env.example`)
@@ -904,7 +910,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
 | P1d-1 | Vite + React + TS scaffold, API client, types mirroring contracts | S | P1c-7 | `npm run dev` connects to the agent ✅ |
-| P1d-2 | Chat panel (session in sessionStorage, loading/error states) | M | P1d-1 | Conversation persists across page reloads within the tab |
+| P1d-2 | Chat panel (session in sessionStorage, loading/error states) | M | P1d-1 | Conversation persists across page reloads within the tab ✅ |
 | P1d-3 | Results table (column registry per entity) + pager via `/plans/execute` | M | P1d-1 | Paging makes no `/chat` call (checked in the network tab / tests) |
 | P1d-4 | docker-compose `ui` service + Playwright E2E for UC1–5 | M | P1d-2, P1d-3 | E2E passes locally |
 
