@@ -777,7 +777,7 @@ ui/
 ├── src/agentApi.ts            # the app's client instance
 ├── src/App.tsx                # shell + live agent connection status (P1d-1)
 ├── src/features/chat/         # ChatPanel, MessageList, ChatInput, useChatSession, chatStorage, describeAgentError
-├── src/features/results/      # P1d-3: ResultsTable (TanStack Table), Pager, usePlanResults
+├── src/features/results/      # ResultsPanel, ResultsTable (TanStack Table v9), Pager, usePlanResults, planSorting
 └── src/features/detail/       # P2c: TransactionDetailDrawer, ChargebackTimeline
 ```
 - **Stack:** React 19, Vite 8, TypeScript 7 (`strict`), TanStack Query, Vitest, oxlint. Run with `make ui-install`, `make ui-dev` (http://localhost:5173, the agent's default CORS origin) and `make ui-test` (typecheck + lint + tests).
@@ -790,8 +790,17 @@ ui/
   - Any non-2xx response becomes `AgentApiError(status, errorCode, message, issues)`, from the shared `ErrorResponse`, or `HTTP_ERROR` / `NETWORK_ERROR`.
   - `checkHealth()` never throws.
 - **Token:** `VITE_AGENT_API_TOKEN` must equal `AGENT_API_TOKEN` while `AUTH_ENABLED`. It is bundled into the page, so this setup is for local, single-user use only.
-- The current `query_plan` is kept in state. `usePlanResults(plan, page)` calls `/api/plans/execute`, and TanStack Query caches pages (P1d-3).
-- Columns are defined by `result_entity` (a column registry per entity, mirroring the backend filter registry).
+- **Results table (P1d-3):**
+  - **`ResultsPanel`** is keyed by the chat's `answerSequence`, so every answer starts again at page 1 with its own plan.
+  - **`usePlanResults(api, plan, page, pageSize, matchingInitialPage)`** is a TanStack Query hook keyed by plan, page and size, calling `/api/plans/execute`, never `/chat`. The chat answer's own page is passed as `initialData` **only** when it is exactly that page (page, size and sort unchanged), because `initialData` would otherwise seed other keys. Pages stay fresh for 60 s, and `keepPreviousData` keeps rows visible while the next page loads.
+  - **Columns** come from a registry per entity (`columnDefinitions.tsx`, TanStack Table **v9**: `tableFeatures({})`, `createColumnHelper`, `useTable`, `table.FlexRender`, core-only, since paging and sorting are server-side).
+    - Transactions show date, customer, amount, merchant, payment, method, card, refund and chargeback.
+    - Chargebacks show opened, customer, amount, status, reason, network, latest event and transaction date.
+    - Money is formatted from the exact decimal strings in its own currency; dates are shown in **America/New_York**, the business timezone.
+  - **Sorting is server-side.** Clicking a sortable header (`transaction_date` / `amount`, `opened_at` / `chargeback_amount`, all checked against the backend's sortable fields) rewrites the plan's last search `sort` (`withSort`) and re-runs it from page 1: descending first, then toggling. Headers carry `aria-sort`, and non-sortable headers aren't buttons.
+  - **`Pager`:** Previous / Next, "Page X of Y · N matches", and a rows-per-page selector (10/25/50/100 plus the answer's own size) that resets to page 1.
+  - **Other states:** "No … matched", "This answer has no table of results", loading, and errors through `describeAgentError` with "Try again".
+  - **Tests** cover: the answer's page shown with no request, paging calling `executePlan(plan, 2, 25)` and never `chat`, page size, server-side sort desc then asc with `aria-sort`, chargeback columns (EUR and New York times), the error and retry, and the empty states; plus unit tests for `withSort` / `nextSort` and the formatters (EST/EDT).
 - **Chat panel (P1d-2):**
   - **`useChatSession(api)`** holds the `session_id`, the transcript and the latest `ChatResponse`, whose plan and first page feed the results table. The `session_id` and transcript are saved to `sessionStorage` under `transaction-dashboard.chat`, so a reload in the same tab keeps the conversation; corrupt or blocked storage starts fresh. That is display state only: the server keeps user questions and their query plans only (§6.4).
   - Sending is a TanStack Query mutation that continues the session.
@@ -911,7 +920,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 |---|---|---|---|---|
 | P1d-1 | Vite + React + TS scaffold, API client, types mirroring contracts | S | P1c-7 | `npm run dev` connects to the agent ✅ |
 | P1d-2 | Chat panel (session in sessionStorage, loading/error states) | M | P1d-1 | Conversation persists across page reloads within the tab ✅ |
-| P1d-3 | Results table (column registry per entity) + pager via `/plans/execute` | M | P1d-1 | Paging makes no `/chat` call (checked in the network tab / tests) |
+| P1d-3 | Results table (column registry per entity) + pager via `/plans/execute` | M | P1d-1 | Paging makes no `/chat` call (checked in the network tab / tests) ✅ |
 | P1d-4 | docker-compose `ui` service + Playwright E2E for UC1–5 | M | P1d-2, P1d-3 | E2E passes locally |
 
 ### Phase 2a — Plan RAG

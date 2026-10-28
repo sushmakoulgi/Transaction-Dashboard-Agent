@@ -13,6 +13,7 @@ export const MAX_QUESTION_LENGTH = 2000
 export interface ChatSession {
   messages: ChatMessage[]
   latestAnswer: ChatResponse | null
+  answerSequence: number // increases with every answer; a new results view per answer
   isWaitingForAnswer: boolean
   sendQuestion: (question: string) => void
   startNewConversation: () => void
@@ -29,6 +30,7 @@ export function useChatSession(api: AgentApiClient): ChatSession {
   const [sessionId, setSessionId] = useState<string | null>(initial.sessionId)
   const [messages, setMessages] = useState<ChatMessage[]>(initial.messages)
   const [latestAnswer, setLatestAnswer] = useState<ChatResponse | null>(null)
+  const [answerSequence, setAnswerSequence] = useState(0)
 
   useEffect(() => {
     saveConversation({ sessionId, messages })
@@ -44,6 +46,7 @@ export function useChatSession(api: AgentApiClient): ChatSession {
     onSuccess: (answer) => {
       setSessionId(answer.session_id)
       setLatestAnswer(answer)
+      setAnswerSequence((sequence) => sequence + 1)
       appendMessage({ role: 'assistant', text: answer.reply })
     },
     onError: (error) => {
@@ -71,11 +74,13 @@ export function useChatSession(api: AgentApiClient): ChatSession {
     setSessionId(null)
     setMessages([])
     setLatestAnswer(null)
+    setAnswerSequence((sequence) => sequence + 1)
   }, [api, sessionId])
 
   return {
     messages,
     latestAnswer,
+    answerSequence,
     isWaitingForAnswer: chat.isPending,
     sendQuestion,
     startNewConversation,

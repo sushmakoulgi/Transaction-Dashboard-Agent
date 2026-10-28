@@ -56,6 +56,7 @@ describe('chat panel', () => {
     const api = fakeApi({
       chat: vi.fn(async () =>
         answer('10 transactions have chargebacks opened this month.', {
+          query_plan: { steps: [{ tool_name: 'search_transactions', filter: null, sort: null }] },
           result_entity: 'transactions',
           result_page: { items: [], page: 1, page_size: 25, total_count: 10, total_pages: 1 },
         }),
@@ -72,7 +73,8 @@ describe('chat panel', () => {
       ]),
     )
     expect(api.chat).toHaveBeenCalledWith(EXAMPLE_QUESTIONS[1], undefined)
-    expect(within(screen.getByRole('region', { name: 'Results' })).getByText(/10 transactions matched/)).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: 'Results' })).getByText(/Page 1 of 1 · 10 matches/)).toBeTruthy()
+    expect(api.executePlan).not.toHaveBeenCalled() // the answer's own page is shown as-is
   })
 
   it('sends on Enter, keeps Shift+Enter for new lines, and continues the session', async () => {

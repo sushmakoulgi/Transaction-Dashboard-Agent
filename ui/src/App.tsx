@@ -2,10 +2,10 @@ import { useQuery } from '@tanstack/react-query'
 
 import { agentApi } from './agentApi'
 import type { AgentApiClient } from './api/agentApiClient'
-import type { ChatResponse } from './api/agentApiTypes'
 import { agentApiConfig } from './config'
 import { ChatPanel } from './features/chat/ChatPanel'
 import { useChatSession } from './features/chat/useChatSession'
+import { ResultsPanel } from './features/results/ResultsPanel'
 
 const HEALTH_CHECK_INTERVAL_MS = 15_000
 
@@ -32,26 +32,9 @@ function App({ api = agentApi }: AppProps) {
       </header>
       <div className="app-layout">
         <ChatPanel session={session} />
-        <ResultsSummary answer={session.latestAnswer} />
+        <ResultsPanel key={session.answerSequence} api={api} answer={session.latestAnswer} />
       </div>
     </main>
-  )
-}
-
-// Until the results table arrives (P1d-3): what the latest answer found.
-function ResultsSummary({ answer }: { answer: ChatResponse | null }) {
-  return (
-    <section className="results-panel" aria-label="Results">
-      <h2>Results</h2>
-      {answer?.result_page && answer.result_entity ? (
-        <p>
-          {answer.result_page.total_count} {answer.result_entity} matched (page {answer.result_page.page} of{' '}
-          {Math.max(answer.result_page.total_pages, 1)}).
-        </p>
-      ) : (
-        <p className="placeholder">Results from your questions will appear here.</p>
-      )}
-    </section>
   )
 }
 
