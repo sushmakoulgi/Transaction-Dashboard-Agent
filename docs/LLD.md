@@ -36,7 +36,7 @@ Transaction_Dashboard/
 │           ├── filter_expression.py  # FilterCondition, FilterGroup, FilterNode
 │           ├── search_request.py     # SearchRequest, SortSpec
 │           ├── paginated_result.py   # PaginatedResult[T]
-│           ├── query_plan.py         # QueryPlan, QueryPlanStep (added in Phase 1c)
+│           ├── query_plan.py         # QueryPlan of typed SearchStep / DetailStep (no results)
 │           ├── filter_validation_issue.py  # FilterValidationIssue, FilterIssueCode
 │           ├── api_responses.py      # ErrorResponse, FilterValidationResult, HealthStatus
 │           ├── search_results.py     # TransactionSummary, ChargebackSummary
@@ -86,8 +86,7 @@ Transaction_Dashboard/
 │       │   ├── mcp_tool_gateway.py   # McpToolGateway: connect once, cached tools, call_tool → ToolCallOutcome
 │       │   └── tool_definition_mapper.py  # MCP Tool → Anthropic tool (sorted, no `discriminator`)
 │       ├── memory/
-│       │   ├── session_store.py      # SessionStore Protocol
-│       │   └── in_memory_session_store.py
+│       │   └── session_store.py      # SessionEntry, SessionStore Protocol, InMemorySessionStore
 │       ├── agent/
 │       │   ├── query_agent.py        # tool-use loop
 │       │   └── query_plan_recorder.py
@@ -533,14 +532,22 @@ class SearchableRepository[ItemT]:
 | DELETE | `/sessions/{id}` | — | clear session |
 
 ```python
-class QueryPlanStep(BaseModel):
-    tool_name: Literal["search_transactions", "search_chargebacks", "get_transaction_detail"]
-    arguments: dict  # SearchRequest without page fields, or {transaction_id}
+# shared/contracts/query_plan.py: typed steps, unknown keys rejected, so no results can live here
+class SearchStep(ContractModel):
+    tool_name: Literal["search_transactions", "search_chargebacks"]
+    filter: FilterNode | None = None
+    sort: SortSpec | None = None          # no page / page_size: chosen when the plan is run
+    entity -> SearchableEntity            # property
 
+class DetailStep(ContractModel):
+    tool_name: Literal["get_transaction_detail"]
+    transaction_id: uuid.UUID
 
-class QueryPlan(BaseModel):
-    steps: list[QueryPlanStep]  # executed in order; last search step drives the table
-    result_entity: Literal["transactions", "chargebacks"]
+QueryPlanStep = Annotated[SearchStep | DetailStep, Field(discriminator="tool_name")]
+
+class QueryPlan(ContractModel):
+    steps: tuple[QueryPlanStep, ...]      # 1-10 steps, executed in order
+    last_search -> SearchStep | None      # property: the search the table shows and pages
 ```
 
 ### 6.2 Claude client (`llm/claude_client.py`, `settings.py`)
@@ -612,23 +619,29 @@ class QueryAgent:
 - **`QueryPlanRecorder`:** records each **successful** call to a search or detail tool in order. These calls become the `QueryPlan`.
 - **System prompt:** today's date and the business timezone, the filter-language rules, "prefer relative date values", "resolve pronouns from conversation context", and "never claim results without calling a tool". It is kept unchanged across requests so it can be cached. The date goes in a mid-conversation system message, not the cached prefix.
 
-### 6.4 Session memory (`memory/`)
+### 6.4 Session memory (`memory/session_store.py`)
 ```python
-class SessionEntry(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    user_question: str
-    query_plan: QueryPlan | None  # tool names + filters only; None if no search ran
-
+class SessionEntry(ContractModel):          # extra="forbid", frozen
+    user_question: str                      # 1-2000 characters
+    query_plan: QueryPlan | None            # tool names + filters only; None if no search ran
 
 class SessionStore(Protocol):
-    async def load_recent_entries(self, session_id: str) -> list[SessionEntry]: ...
+    async def load_recent_entries(self, session_id: str) -> list[SessionEntry]: ...  # oldest first
     async def append_entry(self, session_id: str, entry: SessionEntry) -> None: ...
     async def delete_session(self, session_id: str) -> None: ...
 ```
-- **The store holds user questions and their query plans only.** It never stores query results, tool results or assistant replies. `SessionEntry` forbids extra fields, and `QueryPlan` holds only tool names and filter arguments, so result rows can't be stored by mistake.
+- **The store holds user questions and their query plans only.** It never stores query results, tool results or assistant replies.
+  - `SessionEntry` has exactly two fields and rejects extra keys.
+  - `QueryPlan` steps are typed (`SearchStep` / `DetailStep`, also rejecting extra keys), so result rows and paging can't be stored.
+  - The store also refuses anything that isn't a `SessionEntry`.
 - The stored plan lets Claude narrow an earlier search ("of those, which had refunds?"): it takes the previous filter and adds a condition.
-- `load_recent_entries` returns the last `SESSION_CONTEXT_QUESTION_LIMIT` entries (default 10).
-- **Phase 1:** `InMemorySessionStore`, a dict of `deque(maxlen=limit)` plus an `asyncio.Lock`, with idle sessions expiring after `SESSION_IDLE_TTL_MINUTES`.
+- **`InMemorySessionStore(max_entries_per_session, idle_timeout, clock)`:**
+  - A dict of `deque(maxlen=N)` per session, plus an `asyncio.Lock`.
+  - Idle sessions expire after `idle_timeout`; each read or write refreshes the session. Expired sessions are swept on every call.
+  - The clock is injected, so tests control time.
+  - Returns a copy of the entries.
+- **`session_id`** must be 1–128 letters, digits, `-` or `_`; anything else raises `InvalidSessionIdError`.
+- **Settings (`SessionSettings`):** `SESSION_CONTEXT_QUESTION_LIMIT` (default 10, at most 50) and `SESSION_IDLE_TTL_MINUTES` (default 120).
 - Each turn's Claude conversation is built fresh and thrown away when the turn ends. No assistant turns are replayed across turns, so no compaction is needed.
 - `RedisSessionStore` can replace it later with no other changes (Liskov / Dependency Inversion).
 - The UI keeps its own on-screen transcript (questions and replies) in browser state for display. The server never stores it.
@@ -817,7 +830,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 |---|---|---|---|---|
 | P1c-1 | `ClaudeClient` (model/effort config, adaptive thinking, fallbacks, stop-reason handling, typed error handling) | M | P0-3 | Unit tests with stubbed SDK cover refusal, max_tokens and rate-limit paths ✅ |
 | P1c-2 | `McpToolGateway` + `ToolDefinitionMapper` (lifespan connect, sorted tool list) | M | P1b-3 | Agent lists MCP tools at startup. Mapped schemas are accepted by the API ✅ |
-| P1c-3 | `SessionEntry`, `SessionStore` Protocol + `InMemorySessionStore` (question + plan only, last-N limit, idle TTL) | S | P0-1 | A test checks that no tool result, result row or reply is persisted after a turn. Expiry works |
+| P1c-3 | `SessionEntry`, `SessionStore` Protocol + `InMemorySessionStore` (question + plan only, last-N limit, idle TTL) | S | P0-1 | A test checks that no tool result, result row or reply is persisted after a turn. Expiry works ✅ |
 | P1c-4 | System prompt (stable prefix) + date as a mid-conversation system message | S | P1c-1 | Prompt-cache reads > 0 on the second turn |
 | P1c-5 | `QueryAgent` loop: parallel tool calls, compact tool results, error tool_results, max iterations | L | P1c-1..4 | Scripted tests: success, validation-retry, iteration cap |
 | P1c-6 | `QueryPlanRecorder` + `PlanExecutor` | M | P1c-5 | Re-running a recorded plan returns the same page 1 as the agent did |

@@ -37,3 +37,8 @@ class McpConnectionSettings(AuthenticatedServiceSettings):
     def require_token_when_auth_enabled(self) -> Self:
         self.ensure_api_token(self.mcp_api_token, "MCP_API_TOKEN")
         return self
+
+
+class SessionSettings(BaseServiceSettings):
+    session_context_question_limit: int = Field(default=10, ge=1, le=50)
+    session_idle_ttl_minutes: int = Field(default=120, ge=1)

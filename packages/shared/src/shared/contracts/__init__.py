@@ -14,6 +14,7 @@ from shared.contracts.filterable_field_description import (
     SearchableEntity,
 )
 from shared.contracts.paginated_result import PaginatedResult
+from shared.contracts.query_plan import DetailStep, QueryPlan, QueryPlanStep, SearchStep
 from shared.contracts.search_request import SearchRequest, SortSpec
 from shared.contracts.search_results import ChargebackSummary, TransactionSummary
 from shared.contracts.transaction_detail import (
@@ -28,6 +29,7 @@ __all__ = [
     "ChargebackDetail",
     "ChargebackEventDetail",
     "ChargebackSummary",
+    "DetailStep",
     "ErrorResponse",
     "FilterCondition",
     "FilterGroup",
@@ -41,10 +43,13 @@ __all__ = [
     "Operator",
     "PaginatedResult",
     "PaymentDetail",
+    "QueryPlan",
+    "QueryPlanStep",
     "RefundDetail",
     "RelativeDatePeriod",
     "RelativeDateValue",
     "SearchRequest",
+    "SearchStep",
     "SearchableEntity",
     "SortSpec",
     "TransactionDetail",
