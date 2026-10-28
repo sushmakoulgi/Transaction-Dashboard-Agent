@@ -1,0 +1,48 @@
+:root {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: #1f2933;
+  background: #f5f7fa;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.connection-status {
+  font-size: 0.875rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e4e7eb;
+}
+
+.connection-status--connected {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.connection-status--unreachable {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.placeholder {
+  color: #616e7c;
+}

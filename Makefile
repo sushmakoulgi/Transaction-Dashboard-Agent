@@ -1,6 +1,6 @@
 ALEMBIC := uv run alembic -c packages/transaction_database/alembic.ini
 
-.PHONY: install up up-phase2 down reset-db migrate seed run-transaction-service run-mcp-server run-agent-service lint format test
+.PHONY: install up up-phase2 down reset-db migrate seed run-transaction-service run-mcp-server run-agent-service ui-install ui-dev ui-test ui-api-types lint format test
 
 install:
 	uv sync
@@ -32,6 +32,20 @@ run-mcp-server:
 
 run-agent-service:
 	uv run uvicorn agent_service.main:create_app --factory --port 8000 --reload
+
+ui-install:
+	cd ui && npm install
+
+ui-dev:
+	cd ui && npm run dev
+
+ui-test:
+	cd ui && npm run typecheck && npm run lint && npm test
+
+# Regenerate the UI's TypeScript types after changing the agent service API.
+ui-api-types:
+	uv run python -m agent_service.export_openapi > ui/src/api/agent-openapi.json
+	cd ui && npm run generate:api-types
 
 lint:
 	uv run ruff check .
