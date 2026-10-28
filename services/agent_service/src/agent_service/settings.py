@@ -42,3 +42,9 @@ class McpConnectionSettings(AuthenticatedServiceSettings):
 class SessionSettings(BaseServiceSettings):
     session_context_question_limit: int = Field(default=10, ge=1, le=50)
     session_idle_ttl_minutes: int = Field(default=120, ge=1)
+
+
+class AgentSettings(BaseServiceSettings):
+    business_timezone: str = "America/New_York"
+    max_tool_rounds: int = Field(default=8, ge=1, le=20)  # Claude calls per question
+    tool_result_preview_rows: int = Field(default=10, ge=1, le=100)  # rows Claude sees

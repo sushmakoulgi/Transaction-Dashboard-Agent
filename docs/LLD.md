@@ -89,8 +89,9 @@ Transaction_Dashboard/
 │       ├── memory/
 │       │   └── session_store.py      # SessionEntry, SessionStore Protocol, InMemorySessionStore
 │       ├── agent/
-│       │   ├── query_agent.py        # tool-use loop
-│       │   └── query_plan_recorder.py
+│       │   ├── query_agent.py        # QueryAgent: the tool-use loop (+ ClaudeMessenger / ToolGateway)
+│       │   ├── query_plan_recorder.py  # successful search/detail calls → QueryPlan; last page for the UI
+│       │   └── tool_result_compactor.py  # what Claude sees of each tool result
 │       ├── plan_execution/
 │       │   └── plan_executor.py      # runs a QueryPlan against Transaction Service
 │       └── plan_resolution/          # Phase 2
@@ -576,48 +577,53 @@ class QueryPlan(ContractModel):
   - 400 / 401 / 403 / 404 / 422 → `ClaudeConfigurationError` (fix the key, model or request).
 - **Tests** run the real `AsyncAnthropic` over an `httpx2.MockTransport`. They check the exact request body and headers (model, effort, auto tool choice, fallbacks + beta header, no thinking or sampling fields, `anthropic-version: 2026-10-21`, Bearer key), the reply parsing (thinking block signature preserved), each stop reason, and each error mapping.
 
-### 6.3 Agent loop (`agent/query_agent.py`)
+### 6.3 Agent loop (`agent/query_agent.py`, `query_plan_recorder.py`, `tool_result_compactor.py`)
 ```python
 class QueryAgent:
-    def __init__(
-        self,
-        claude_client,
-        tool_gateway: McpToolGateway,
-        session_store: SessionStore,
-        plan_recorder_factory,
-        max_tool_iterations: int = 8,
-    ): ...
+    def __init__(self, claude: ClaudeMessenger, tools: ToolGateway, sessions: SessionStore,
+                 clock: Clock, business_timezone: ZoneInfo,
+                 max_tool_rounds: int, tool_result_preview_rows: int): ...
 
-    async def answer(self, session_id: str, user_question: str) -> AgentAnswer:
-        previous_entries = await self.session_store.load_recent_entries(session_id)
-        turn_messages = [user_turn(render_question_with_context(previous_entries, user_question))]
-        recorder = self.plan_recorder_factory()
-        for _ in range(self.max_tool_iterations):
-            response = await self.claude_client.create_message(
-                turn_messages, self.tool_gateway.tool_definitions
-            )
-            turn_messages.append(assistant_turn(response.content))
-            if response.stop_reason != "tool_use":
-                break
-            tool_results = await self._run_tool_calls(
-                response, recorder
-            )  # parallel; one user message
-            turn_messages.append(user_turn(tool_results))
-        query_plan = recorder.build_plan()
-        await self.session_store.append_entry(
-            session_id, SessionEntry(user_question=user_question, query_plan=query_plan)
-        )
-        return AgentAnswer(
-            reply=final_text(response),
-            query_plan=query_plan,
-            result_page=recorder.last_successful_page(),
-        )
-        # turn_messages (tool results, replies) goes out of scope here — never persisted
+    async def answer(self, session_id: str, question: str) -> AgentAnswer:
+        # 1-2000 chars, else InvalidQuestionError (before any Claude call)
+        messages = build_turn_messages(await sessions.load_recent_entries(session_id),
+                                       question, clock, timezone)      # [user, system(date)]
+        while claude_calls < max_tool_rounds:
+            reply = await claude.create_message(system_blocks(), messages, tools.tool_definitions)
+            messages.append({"role": "assistant", "content": reply.content})  # unmodified blocks
+            if not reply.wants_tools:
+                break                                                   # final answer
+            messages.append({"role": "user", "content": await self._run_tools(reply, recorder)})
+        await sessions.append_entry(session_id,
+                                    SessionEntry(user_question=question, query_plan=recorder.build_plan()))
+        return AgentAnswer(reply, query_plan, result_page, result_entity,
+                           claude_calls, tool_calls, reached_round_limit)
+        # `messages` (tool calls, tool results, replies) goes out of scope here: never persisted
 ```
-- **Context message:** `render_question_with_context` builds one user message: `<previous_questions>` (numbered, oldest first, each with the tool and filters it used) followed by `<current_question>`. Earlier entries are labelled as context only, so Claude acts on the current question.
-- **Tool result sent to Claude:** `total_count`, `page`, and up to 10 rows with only the key columns. The full page goes to the UI and is never fed back into the LLM context.
-- **Validation errors:** returned to Claude as `tool_result` with `is_error: true` and the issue list. This is R6.
-- **`QueryPlanRecorder`:** records each **successful** call to a search or detail tool in order. These calls become the `QueryPlan`.
+- **Interfaces:** `ClaudeMessenger` (implemented by `ClaudeClient`) and `ToolGateway` (implemented by `McpToolGateway`) are Protocols, so tests script Claude and the tools exactly.
+- **Tool calls in one reply run concurrently** (`asyncio.gather`). Their results go back in **one** user message, in Claude's request order.
+- **What Claude sees** (`ToolResultCompactor`):
+  - Searches send `total_count, page, page_size, total_pages, rows_on_this_page` plus the first `TOOL_RESULT_PREVIEW_ROWS` (10) rows, and a note that the user sees all rows in the table.
+  - Detail and metadata results go through whole.
+  - Errors go through verbatim with `is_error: true` (R6: the issues and suggestions let Claude fix its call).
+  - **The full page goes to the UI** (`AgentAnswer.result_page`) and never into Claude's context.
+- **`QueryPlanRecorder`** records each **successful** search or detail call, in order:
+  - It skips discovery calls (`list_filterable_fields`, `validate_filters`) and failed calls, and records an immediate repeat of the same step once.
+  - Steps keep the `filter` and `sort` only, never paging.
+  - It keeps the last successful search's page and entity for the UI.
+- **Round limit:** after `MAX_TOOL_ROUNDS` (8) Claude calls without a final answer, the reply says so, `reached_round_limit=True`, and the plan and results gathered so far are returned and saved.
+- **Failures:** a `ClaudeError` (refusal, unavailable, …) propagates to the API layer and **nothing is saved**. Tool failures never raise; they are tool results.
+- **Tests** (scripted Claude + scripted tools, no API calls) cover:
+  - A search answer, and the trimmed page for Claude versus the full page for the UI.
+  - Claude's content sent back as the very same objects (thinking signature intact).
+  - A validation error going back to Claude, then the retry, with the failed call kept out of the plan.
+  - The round limit.
+  - A Claude failure saving nothing, and invalid questions never reaching Claude.
+  - Parallel calls (3 at once, one results message, in order).
+  - A clarifying answer having no plan.
+  - Memory holding only the question and plan: no reply text, rows, totals or thinking signatures.
+  - The follow-up turn receiving the earlier question and plan.
+
 - **System prompt** (`llm/system_prompt.py`, `SYSTEM_PROMPT`): one fixed string, byte-identical on every request (a test checks it holds no dates or years), so the tools + system prefix caches. It covers how to behave; the filter language itself lives in the tool descriptions and is not repeated:
   - Facts only from tool calls; never invent counts, amounts, IDs or statuses.
   - Which tool answers what, and to build filters (never SQL), preferring relative dates.
@@ -846,7 +852,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1c-2 | `McpToolGateway` + `ToolDefinitionMapper` (lifespan connect, sorted tool list) | M | P1b-3 | Agent lists MCP tools at startup. Mapped schemas are accepted by the API ✅ |
 | P1c-3 | `SessionEntry`, `SessionStore` Protocol + `InMemorySessionStore` (question + plan only, last-N limit, idle TTL) | S | P0-1 | A test checks that no tool result, result row or reply is persisted after a turn. Expiry works ✅ |
 | P1c-4 | System prompt (stable prefix) + date as a mid-conversation system message | S | P1c-1 | Prompt-cache reads > 0 on the second turn ✅ (the live cache-read check runs with P1c-9) |
-| P1c-5 | `QueryAgent` loop: parallel tool calls, compact tool results, error tool_results, max iterations | L | P1c-1..4 | Scripted tests: success, validation-retry, iteration cap |
+| P1c-5 | `QueryAgent` loop: parallel tool calls, compact tool results, error tool_results, max iterations | L | P1c-1..4 | Scripted tests: success, validation-retry, iteration cap ✅ |
 | P1c-6 | `QueryPlanRecorder` + `PlanExecutor` | M | P1c-5 | Re-running a recorded plan returns the same page 1 as the agent did |
 | P1c-7 | Routes: `/chat`, `/plans/execute`, `/transactions/{id}`, sessions; CORS for UI | M | P1c-6 | OpenAPI. Session ID created when absent |
 | P1c-9 | Live natural-language eval (~25 prompts covering UC1–5, follow-ups, OR/NOT phrasing) | M | P1c-7 | ≥ 90% choose the correct tool and filters; `cache_read_input_tokens` > 0 from the second request |
