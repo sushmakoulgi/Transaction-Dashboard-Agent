@@ -720,58 +720,86 @@ class SessionStore(Protocol):
 - **Used by** `/plans/execute` (P1c-7) for paging, and in Phase 2 for cache / RAG hits.
 - **Verified end to end:** a `QueryAgent` (scripted Claude, real MCP tools → real Transaction Service → Postgres) answers a question. Re-running its recorded plan returns a page 1 **identical** to the agent's `result_page`, and pages 1–3 together cover all 15 matching transactions without duplicates.
 
-## 7. Phase 2 — Plan resolution
+## 7. Phase 2 — Plan cache (Chroma)
 
-### 7.1 Interfaces
+Finalized 2026-10-28. A question whose *shape* was answered before reuses the stored query plan, so **no Opus call** is made. Results are always fetched fresh; only plans are stored. Redis is **not** built for now: the metrics count how often an embedding lookup finds an *exact* match (the case a Redis key would catch), and Redis is reconsidered only if that number is high.
+
+### 7.1 Components (`agent_service/plan_cache/`)
 ```python
-class PlanResolver(Protocol):
-    async def resolve(self, query: ExtractedQuery) -> ResolvedPlan | None: ...
+class EmbeddingProvider(Protocol):            # VoyageEmbeddingProvider (voyageai SDK)
+    async def embed_query(self, text: str) -> list[float]: ...      # input_type="query"
+    async def embed_document(self, text: str) -> list[float]: ...   # input_type="document"
 
+class QueryTemplateExtractor:                 # Haiku, structured output
+    async def extract(self, message: str, session_entries: list[SessionEntry]) -> ExtractedQuery: ...
 
-class ChainedPlanResolver:  # Chain of Responsibility
-    def __init__(
-        self, resolvers: list[PlanResolver]
-    ): ...  # [RedisPlanCache, ChromaVectorPlanStore]
+class ChromaPlanStore:                        # collection "query_plan_templates", cosine
+    async def nearest(self, embedding: list[float]) -> PlanMatch | None: ...
+    async def add(self, template: StoredPlanTemplate, embedding: list[float]) -> None: ...
+    async def record_hit(self, template_id: str) -> None: ...
 
+class PlanCacheMetrics:                       # counters persisted in Chroma ("plan_cache_metrics")
+    async def record(self, outcome: PlanCacheOutcome) -> None: ...
+    async def snapshot(self) -> PlanCacheMetricsSnapshot: ...
 
-class EmbeddingProvider(Protocol):
-    async def embed_query(self, text: str) -> list[float]: ...
-    async def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
+class PlanCache:                              # the flow in 7.4; used by the /chat route
+    async def try_answer(self, session_id, message) -> CachedAnswer | None: ...
+    async def learn(self, extracted, recorded_plan, best_similarity) -> None: ...
 ```
 
 ### 7.2 Template extraction (`query_template_extractor.py`)
-- Uses `claude-haiku-5-5` with structured output (`output_config.format`). It receives the user message plus the entities currently in the session context.
-- It returns:
+- `claude-haiku-5-5` with structured output. Input: the user message plus the session's earlier questions and plans (never results).
+- Output:
   ```python
   class ExtractedQuery(BaseModel):
-      template_text: str  # "chargebacks opened this month for customer {customer_id}"
-      slot_values: dict[str, str]  # {"customer_id": "10001641"}
-      is_self_contained: bool  # False if a pronoun can't be resolved → skip cache, use agent
+      template_text: str             # "chargebacks opened this month for customer {customer_id}"
+      slot_values: dict[str, str]    # {"customer_id": "10001641"}
+      is_self_contained: bool        # False for follow-ups ("does it have a refund?") → agent
   ```
-- Relative dates stay in the template as words ("this month"). They are not slots, because the Transaction Service resolves them.
+- Slots are concrete values the user typed: IDs, merchant names, amounts, explicit dates, statuses. Relative dates stay as words ("this month") because the Transaction Service resolves them at run time, so a stored plan stays correct as months change.
+- The template text is normalized (lowercase, single spaces, no trailing punctuation) before it is embedded or compared.
 
-### 7.3 Stored plan
+### 7.3 Stored template (Chroma)
 ```python
 class StoredPlanTemplate(BaseModel):
-    template_id: str  # sha256(normalized template_text)
-    template_text: str
+    template_id: str                 # sha256(normalized template_text)
+    template_text: str               # the Chroma document
     slot_names: list[str]
-    plan_template: QueryPlan  # argument values may be {"$slot": "customer_id"}
+    plan_template: QueryPlan         # filter values may be {"$slot": "customer_id"}
     created_at: datetime
     hit_count: int
-    last_used_at: datetime
+    last_used_at: datetime | None
 ```
-- **Chroma** (`collection="query_plan_templates"`, cosine distance): the document is `template_text`, the embedding comes from Voyage, and the metadata holds `template_id`, `slot_names` and the JSON plan.
-- **Redis:** key `plan_template:{template_id}` holds the JSON. TTL is `PLAN_CACHE_TTL_SECONDS` (default 86400; `0` means no expiry). The TTL is refreshed on every hit.
+- Collection `query_plan_templates` (cosine). Metadata holds `slot_names`, the plan JSON, `hit_count`, timestamps. Similarity = 1 − cosine distance.
+- Collection `plan_cache_metrics` holds one record with the counters (7.5), so they survive restarts.
 
-### 7.4 Resolution algorithm
-1. Run `extract(message, session_context)`. If it isn't self-contained, go to the full agent.
-2. Check Redis for `GET plan_template:{sha256(template)}`. A hit means steps 3 and 4 are skipped.
-3. Embed the template with Voyage and run a Chroma `query(n_results=3)`. Accept the top result if `similarity ≥ PLAN_SIMILARITY_THRESHOLD` (default 0.90) **and** `slot_names ⊆ slot_values.keys()`.
-4. On a hit, write the plan to Redis (promote it).
-5. `SlotSubstitutor.substitute(plan_template, slot_values)` replaces `{"$slot": ...}` markers; a missing slot is an error. Then `validate_filters` runs for each step. If anything fails, go to the full agent.
-6. `PlanExecutor` runs the plan. The reply is a fixed template, e.g. "Found {total} chargebacks for {customer_id} opened this month." The turn is appended to session history.
-7. **Miss path:** the full agent runs. If the recorded plan succeeded, the agent's slot values in the arguments are replaced with `{"$slot": ...}` markers (matched by value against `slot_values`). The template is then stored in Chroma and Redis. Plans are stored by a background task so the response isn't delayed.
+### 7.4 Flow for each `/chat` message
+1. **Extract** with Haiku. Not self-contained → miss `follow_up`.
+2. **Embed** the normalized template (Voyage, `input_type="query"`) and ask Chroma for the nearest template.
+3. **Exact match** = the nearest template's text equals the normalized template text. Counted separately (this is what a Redis key would have caught).
+4. **Hit** if similarity ≥ `PLAN_HIT_THRESHOLD` (default 0.90) **and** every stored slot has a value. Substitute the slots, run `validate_filters` for each step, then run the plan with `PlanExecutor` (page 1). The reply is a fixed template, e.g. *"Found 6 chargebacks."* The question and plan are added to session memory so follow-ups work. `ChatResponse.plan_source = "cache"`.
+5. **Miss** (any failure above, or Chroma/Voyage/Haiku unavailable): the full Opus agent runs as today (`plan_source = "agent"`).
+6. **Learn** (background task, after a miss): store the agent's plan only if
+   - the plan was recorded and succeeded,
+   - the question was self-contained, and
+   - the best similarity found in step 2 was **below** `PLAN_HIT_THRESHOLD` (a new shape; near-duplicates are not stored again).
+   Slot values in the plan are replaced with `{"$slot": ...}` markers before storing.
+- `PLAN_CACHE_ENABLED=false` turns the whole thing off. Any cache error falls back to the agent; the cache never fails a request.
+
+### 7.5 Metrics (`GET /api/metrics/plan-cache`)
+```json
+{
+  "since": "2026-10-28T20:00:00Z",
+  "lookups": 120,
+  "hits": {"exact": 40, "similar": 35},
+  "misses": {"below_threshold": 30, "follow_up": 10, "missing_slot": 2, "invalid_plan": 1, "unavailable": 2},
+  "learned": {"stored": 25, "skipped_similar": 3, "skipped_unsuccessful": 2},
+  "hit_rate": 0.625,
+  "exact_match_rate": 0.333,
+  "top_templates": [{"template_text": "chargebacks opened this month", "hit_count": 31}]
+}
+```
+`exact_match_rate` = exact hits ÷ lookups: the number that decides whether a Redis exact-key cache is worth adding.
 
 ## 8. UI (React + Vite + TS)
 
@@ -874,9 +902,10 @@ SESSION_CONTEXT_QUESTION_LIMIT=10
 VOYAGE_API_KEY=***
 EMBEDDING_MODEL=<voyage model id>
 CHROMA_URL=http://chroma:8000
-REDIS_URL=redis://redis:6379/0
-PLAN_CACHE_TTL_SECONDS=86400
-PLAN_SIMILARITY_THRESHOLD=0.90
+PLAN_CACHE_ENABLED=true
+PLAN_HIT_THRESHOLD=0.90
+TEMPLATE_EXTRACTOR_MODEL=claude-haiku-5-5
+# REDIS_URL / PLAN_CACHE_TTL_SECONDS: only if Phase 2b (Redis) is built later
 ```
 
 ## 10. SOLID / code conventions
@@ -969,13 +998,14 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 ### Phase 2a — Plan RAG
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
-| P2a-1 | `EmbeddingProvider` Protocol + `VoyageEmbeddingProvider` | S | P0-3 | Query vs document input types used correctly. Retries on rate limit |
-| P2a-2 | `QueryTemplateExtractor` (Haiku, structured output, session-context aware) | M | P1c-1 | Extraction tests: slots found; pronoun without context → `is_self_contained=False` |
+| P2a-1 | `EmbeddingProvider` Protocol + `VoyageEmbeddingProvider`; settings (`VOYAGE_API_KEY`, model, `PLAN_CACHE_ENABLED`, `PLAN_HIT_THRESHOLD`) | S | P0-3 | Query vs document input types used correctly. Retries on rate limit |
+| P2a-2 | `QueryTemplateExtractor` (Haiku, structured output, session-context aware) + template normalization | M | P1c-1 | Extraction tests: slots found; follow-up without context → `is_self_contained=False` |
 | P2a-3 | `StoredPlanTemplate` + `SlotSubstitutor` (+ de-substitution of a recorded plan) | M | P1c-6 | Round trip: plan → template → substituted plan is identical |
-| P2a-4 | `ChromaVectorPlanStore` (collection, upsert by template_id, threshold query) | M | P2a-1, P2a-3 | Similar phrasings hit; different intents miss at 0.90 |
-| P2a-5 | Plan resolution wiring in `/chat`: extract → resolve → validate → execute; background store on miss | L | P2a-2..4 | A repeated query shape makes no Opus call (verified by stubbed client counters) |
+| P2a-4 | Chroma in the default compose stack + `ChromaPlanStore` (nearest, add, record_hit) | M | P2a-1, P2a-3 | Similar phrasings hit; different intents miss at 0.90 |
+| P2a-5 | `PlanCacheMetrics` persisted in Chroma + `GET /api/metrics/plan-cache` | S | P2a-4 | Counters survive an agent restart; exact vs similar hits counted separately |
+| P2a-6 | `PlanCache` wiring in `/chat`: extract → match → validate → execute; background learn on miss (store only below threshold); `plan_source` in `ChatResponse` + UI badge | L | P2a-2..5 | A repeated question shape makes no Opus call (stubbed client counters); a near-duplicate is not stored twice |
 
-### Phase 2b — Redis cache
+### Phase 2b — Redis cache (on hold: decide from `exact_match_rate`, see §7.5)
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
 | P2b-1 | `RedisPlanCache` (get/put, configurable TTL, TTL refresh on hit, hit counter) | S | P0-2 | TTL honored; `0` means no expiry |

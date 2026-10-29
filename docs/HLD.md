@@ -17,7 +17,7 @@ Let a user ask questions about payment transactions in natural language ("show c
 
 ### In scope
 - **Phase 1:** Postgres data store with seed data, read-only Transaction Service, MCP server, Claude-based agent with session memory, React UI with pagination.
-- **Phase 2:** RAG lookup of query plans (Voyage embeddings in ChromaDB), Redis plan cache with TTL, and a click-through detail view.
+- **Phase 2:** RAG lookup of query plans (Voyage embeddings in ChromaDB) with hit/miss metrics, and a click-through detail view. A Redis exact-match cache is on hold until the metrics show how often exact matches occur.
 
 ### Out of scope (for now)
 - Writing data through the API (no insert, update or delete).
@@ -136,17 +136,18 @@ If validation fails, the Transaction Service returns structured errors such as `
 ```mermaid
 flowchart TD
     Q[User message] --> X[Extract template + slots<br/>Haiku, structured output]
-    X --> R{Redis hit on<br/>template hash?}
-    R -- yes --> S[Substitute slots into plan]
-    R -- no --> V{Chroma similarity<br/>≥ threshold?}
-    V -- yes --> S
+    X -- follow-up --> L
+    X --> V{Nearest Chroma template<br/>similarity ≥ 0.90?}
+    V -- yes --> S[Substitute slots into plan]
     V -- no --> L[Full agent loop<br/>Opus + MCP tools]
     S --> VAL{Validate filters}
-    VAL -- ok --> E[Execute plan steps in order]
+    VAL -- ok --> E[Execute plan steps in order<br/>fixed reply, no Opus call]
     VAL -- invalid --> L
     L --> E2[Execute]
-    E2 --> STORE[Store template + plan<br/>Chroma + Redis with TTL]
-    E --> PROMOTE[Increment hits, refresh Redis TTL]
+    E2 --> STORE{Best similarity<br/>below 0.90?}
+    STORE -- yes --> ADD[Store template + plan in Chroma]
+    E --> HIT[Increment template hit count]
+    V -.-> M[(Metrics in Chroma:<br/>exact / similar hits, misses, stores)]
 ```
 
 Every plan that runs successfully is stored. A plan "runs successfully" when every step passes validation and executes without error; zero rows still counts as success.
