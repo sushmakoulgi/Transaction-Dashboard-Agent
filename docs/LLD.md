@@ -771,6 +771,8 @@ class StoredPlanTemplate(BaseModel):
     hit_count: int
     last_used_at: datetime | None
 ```
+- **Markers** (`slot_substitutor.py`): a value becomes `{"$slot": name, "as": form}`. `as` records how the plan wrote what the user typed (`text`, `upper`, `lower`, `title`, `number`, `number_text`), so "rogers" → "Rogers" and "$1,250" → 1250 are reapplied to new values.
+- **Safety rule:** a template is refused (the agent's answer is simply not stored) when a slot can't be found in the plan, or when a value the question mentions is still written into the plan. Otherwise "bell chargebacks" could match a stored "rogers chargebacks" and silently run the Rogers search. Filling a template validates the result as a `QueryPlan` (e.g. a slot value that isn't a 15-digit transaction ID fails, and the agent answers).
 - Collection `query_plan_templates` (cosine). Metadata holds `slot_names`, the plan JSON, `hit_count`, timestamps. Similarity = 1 − cosine distance.
 - Collection `plan_cache_metrics` holds one record with the counters (7.5), so they survive restarts.
 
@@ -1001,7 +1003,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 |---|---|---|---|---|
 | P2a-1 | `EmbeddingProvider` Protocol + `VoyageEmbeddingProvider`; settings (`VOYAGE_API_KEY`, model, `PLAN_CACHE_ENABLED`, `PLAN_HIT_THRESHOLD`) | S | P0-3 | One input type for both sides. Retries on 429/5xx/network, not on 4xx. Off by default; enabled without a key still starts (warning logged, every question goes to Claude) ✅ |
 | P2a-2 | `QueryTemplateExtractor` (Haiku, structured output, session-context aware) + template normalization | M | P1c-1 | Extraction tests: slots found; follow-up without context → `is_self_contained=False`. Slot values must appear in the question and match the template's placeholders, else the agent answers ✅ |
-| P2a-3 | `StoredPlanTemplate` + `SlotSubstitutor` (+ de-substitution of a recorded plan) | M | P1c-6 | Round trip: plan → template → substituted plan is identical |
+| P2a-3 | `StoredPlanTemplate` + `SlotSubstitutor` (+ de-substitution of a recorded plan) | M | P1c-6 | Round trip: plan → template → substituted plan is identical. Refused when a slot isn't in the plan or a question value stays baked into the plan ✅ |
 | P2a-4 | Chroma in the default compose stack + `ChromaPlanStore` (nearest, add, record_hit) | M | P2a-1, P2a-3 | Similar phrasings hit; different intents miss at 0.90 |
 | P2a-5 | `PlanCacheMetrics` persisted in Chroma + `GET /api/metrics/plan-cache` | S | P2a-4 | Counters survive an agent restart; exact vs similar hits counted separately |
 | P2a-6 | `PlanCache` wiring in `/chat`: extract → match → validate → execute; background learn on miss (store only below threshold); `plan_source` in `ChatResponse` + UI badge | L | P2a-2..5 | A repeated question shape makes no Opus call (stubbed client counters); a near-duplicate is not stored twice |

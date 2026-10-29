@@ -69,7 +69,7 @@ async def test_extracts_a_normalized_template_with_slots() -> None:
     assert request["model"] == "claude-haiku-5-5"
     assert request["output_format"] is _ExtractionOutput
     assert request["output_config"] == {"effort": "low"}
-    assert "relative dates" in request["system"]
+    assert "relative date words" in request["system"]
     assert request["messages"] == [
         {
             "role": "user",

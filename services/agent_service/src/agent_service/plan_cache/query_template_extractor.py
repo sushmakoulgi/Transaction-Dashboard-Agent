@@ -31,17 +31,20 @@ templates. Two questions with the same template must be answerable by the same s
 only the slot values changed.
 
 Replace every concrete value the user typed with a {slot} placeholder and return it as a \
-slot. Slot names are lowercase field names such as customer_id, transaction_id, payment_id, \
-merchant_name, amount, min_amount, max_amount, date, start_date, end_date, card_brand, \
-payment_status, chargeback_status, reason_code. Use each name once; number repeats \
-(merchant_name_2). Slot values are copied exactly as the user typed them.
+slot: IDs, merchant names, amounts, explicit dates, statuses (captured, under review, won, \
+lost), payment methods (card, wallet, ACH), card brands (Visa, Amex), reason codes, and \
+the number in "last N days". Slot names are lowercase field names such as customer_id, \
+transaction_id, payment_id, merchant_name, amount, min_amount, max_amount, date, \
+start_date, end_date, days, card_brand, payment_method, payment_status, \
+chargeback_status, reason_code. Use each name once; number repeats (merchant_name_2). \
+Slot values are copied exactly as the user typed them.
 
-Do not turn relative dates into slots: keep "today", "yesterday", "this month", \
-"last month", "last 7 days" as words, because they are resolved when the search runs.
+Do not turn the relative date words into slots: keep "today", "yesterday", "this month", \
+"last month", "this year" as words, because they are resolved when the search runs.
 
 Keep the rest of the wording short and neutral: drop greetings and filler ("please", \
-"can you show me"), keep words that change the meaning (status words, "not", "over", \
-"refunded", "chargeback", "this month").
+"can you show me"), keep words that change the meaning ("not", "over", "under", \
+"refunded", "chargeback", "transactions", "this month").
 
 is_self_contained is false when the question only makes sense with the earlier questions, \
 for example "does it have a refund?", "what about last month?", "sort those by amount", \
@@ -56,6 +59,9 @@ template "chargebacks opened this month", no slots, self-contained.
 - "Rogers transactions over $500 that were refunded" -> \
 template "{merchant_name} transactions over {amount} that were refunded", \
 slots [merchant_name=Rogers, amount=$500], self-contained.
+- "captured card payments in the last 7 days" -> \
+template "{payment_status} {payment_method} payments in the last {days} days", \
+slots [payment_status=captured, payment_method=card, days=7], self-contained.
 - "does it have a refund?" (after a question about one payment) -> \
 template "does it have a refund", no slots, not self-contained."""
 
