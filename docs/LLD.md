@@ -726,9 +726,10 @@ Finalized 2026-10-28. A question whose *shape* was answered before reuses the st
 
 ### 7.1 Components (`agent_service/plan_cache/`)
 ```python
-class EmbeddingProvider(Protocol):            # VoyageEmbeddingProvider (voyageai SDK)
-    async def embed_query(self, text: str) -> list[float]: ...      # input_type="query"
-    async def embed_document(self, text: str) -> list[float]: ...   # input_type="document"
+class EmbeddingProvider(Protocol):            # VoyageEmbeddingProvider (REST /v1/embeddings via httpx)
+    async def embed(self, text: str) -> list[float]: ...
+    # Stored templates and new questions use the same input_type ("query"): they are compared
+    # with each other, so identical text must score similarity 1.0.
 
 class QueryTemplateExtractor:                 # Haiku, structured output
     async def extract(self, message: str, session_entries: list[SessionEntry]) -> ExtractedQuery: ...
@@ -900,7 +901,7 @@ SESSION_IDLE_TTL_MINUTES=120
 SESSION_CONTEXT_QUESTION_LIMIT=10
 # Phase 2
 VOYAGE_API_KEY=***
-EMBEDDING_MODEL=<voyage model id>
+EMBEDDING_MODEL=voyage-4-lite
 CHROMA_URL=http://chroma:8000
 PLAN_CACHE_ENABLED=true
 PLAN_HIT_THRESHOLD=0.90
@@ -998,7 +999,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 ### Phase 2a — Plan RAG
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
-| P2a-1 | `EmbeddingProvider` Protocol + `VoyageEmbeddingProvider`; settings (`VOYAGE_API_KEY`, model, `PLAN_CACHE_ENABLED`, `PLAN_HIT_THRESHOLD`) | S | P0-3 | Query vs document input types used correctly. Retries on rate limit |
+| P2a-1 | `EmbeddingProvider` Protocol + `VoyageEmbeddingProvider`; settings (`VOYAGE_API_KEY`, model, `PLAN_CACHE_ENABLED`, `PLAN_HIT_THRESHOLD`) | S | P0-3 | One input type for both sides. Retries on 429/5xx/network, not on 4xx. Off by default; on without a key fails at startup ✅ |
 | P2a-2 | `QueryTemplateExtractor` (Haiku, structured output, session-context aware) + template normalization | M | P1c-1 | Extraction tests: slots found; follow-up without context → `is_self_contained=False` |
 | P2a-3 | `StoredPlanTemplate` + `SlotSubstitutor` (+ de-substitution of a recorded plan) | M | P1c-6 | Round trip: plan → template → substituted plan is identical |
 | P2a-4 | Chroma in the default compose stack + `ChromaPlanStore` (nearest, add, record_hit) | M | P2a-1, P2a-3 | Similar phrasings hit; different intents miss at 0.90 |

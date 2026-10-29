@@ -51,7 +51,35 @@ class AgentSettings(BaseServiceSettings):
     tool_result_preview_rows: int = Field(default=10, ge=1, le=100)  # rows Claude sees
 
 
-class AgentServiceSettings(ClaudeSettings, McpConnectionSettings, SessionSettings, AgentSettings):
+class PlanCacheSettings(BaseServiceSettings):
+    """Phase 2 plan cache: reuse a stored query plan for a question of the same shape.
+
+    Off by default; turning it on needs VOYAGE_API_KEY (the embeddings of the templates).
+    """
+
+    plan_cache_enabled: bool = False
+    plan_hit_threshold: float = Field(default=0.90, gt=0, le=1)  # cosine similarity
+    voyage_api_key: SecretStr | None = None
+    voyage_api_url: AnyHttpUrl = AnyHttpUrl("https://api.voyageai.com/v1")
+    embedding_model: str = "voyage-4-lite"
+    embedding_timeout_seconds: float = Field(default=10.0, gt=0)
+    embedding_max_retries: int = Field(default=2, ge=0)  # on 429, 5xx and network errors
+
+    @field_validator("voyage_api_key", mode="before")
+    @classmethod
+    def blank_voyage_key_means_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @model_validator(mode="after")
+    def require_voyage_key_when_enabled(self) -> Self:
+        if self.plan_cache_enabled and self.voyage_api_key is None:
+            raise ValueError("VOYAGE_API_KEY is required while PLAN_CACHE_ENABLED is true")
+        return self
+
+
+class AgentServiceSettings(
+    ClaudeSettings, McpConnectionSettings, SessionSettings, AgentSettings, PlanCacheSettings
+):
     """Everything the agent service reads from the environment / .env."""
 
     agent_api_token: SecretStr | None = api_token_field()  # what the UI sends (AUTH_ENABLED)
