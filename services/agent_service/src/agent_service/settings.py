@@ -1,3 +1,4 @@
+import logging
 from typing import Literal, Self
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
@@ -6,6 +7,8 @@ from shared.config import BaseServiceSettings
 from shared.config.settings import AuthenticatedServiceSettings, api_token_field
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeSettings(BaseServiceSettings):
@@ -54,7 +57,8 @@ class AgentSettings(BaseServiceSettings):
 class PlanCacheSettings(BaseServiceSettings):
     """Phase 2 plan cache: reuse a stored query plan for a question of the same shape.
 
-    Off by default; turning it on needs VOYAGE_API_KEY (the embeddings of the templates).
+    Off by default. It needs VOYAGE_API_KEY (the embeddings of the templates); without the
+    key the service still starts and every question goes to Claude, as with the cache off.
     """
 
     plan_cache_enabled: bool = False
@@ -64,6 +68,9 @@ class PlanCacheSettings(BaseServiceSettings):
     embedding_model: str = "voyage-4-lite"
     embedding_timeout_seconds: float = Field(default=10.0, gt=0)
     embedding_max_retries: int = Field(default=2, ge=0)  # on 429, 5xx and network errors
+    template_extractor_model: str = "claude-haiku-5-5"
+    template_extractor_effort: Effort = "low"  # a short extraction, not a hard problem
+    template_extractor_max_tokens: int = Field(default=4000, ge=512)
 
     @field_validator("voyage_api_key", mode="before")
     @classmethod
@@ -71,10 +78,18 @@ class PlanCacheSettings(BaseServiceSettings):
         return None if isinstance(value, str) and not value.strip() else value
 
     @model_validator(mode="after")
-    def require_voyage_key_when_enabled(self) -> Self:
+    def warn_when_enabled_without_a_key(self) -> Self:
         if self.plan_cache_enabled and self.voyage_api_key is None:
-            raise ValueError("VOYAGE_API_KEY is required while PLAN_CACHE_ENABLED is true")
+            logger.warning(
+                "PLAN_CACHE_ENABLED is true but VOYAGE_API_KEY is not set: the plan cache is "
+                "off and every question goes to Claude"
+            )
         return self
+
+    @property
+    def plan_cache_active(self) -> bool:
+        """Whether questions are looked up in the plan cache before going to Claude."""
+        return self.plan_cache_enabled and self.voyage_api_key is not None
 
 
 class AgentServiceSettings(

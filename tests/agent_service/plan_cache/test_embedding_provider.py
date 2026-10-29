@@ -4,7 +4,7 @@ import json
 
 import httpx
 import pytest
-from pydantic import SecretStr, ValidationError
+from pydantic import SecretStr
 
 from agent_service.plan_cache.embedding_provider import (
     EmbeddingError,
@@ -123,8 +123,8 @@ async def test_empty_text_is_rejected_without_a_request() -> None:
     assert transport.requests == []
 
 
-def test_plan_cache_is_off_by_default_and_needs_a_key_when_on(
-    monkeypatch: pytest.MonkeyPatch,
+def test_plan_cache_is_off_by_default_and_a_missing_key_never_stops_the_service(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     for name in ("PLAN_CACHE_ENABLED", "VOYAGE_API_KEY", "PLAN_HIT_THRESHOLD"):
         monkeypatch.delenv(name, raising=False)
@@ -132,9 +132,12 @@ def test_plan_cache_is_off_by_default_and_needs_a_key_when_on(
     assert defaults.plan_cache_enabled is False
     assert defaults.plan_hit_threshold == 0.90
     assert defaults.embedding_model == "voyage-4-lite"
+    assert defaults.plan_cache_active is False
 
-    with pytest.raises(ValidationError, match="VOYAGE_API_KEY is required"):
-        PlanCacheSettings(_env_file=None, plan_cache_enabled=True, voyage_api_key="  ")  # type: ignore[call-arg]
+    # Enabled without a key: the service still starts; questions go to Claude.
+    without_key = PlanCacheSettings(_env_file=None, plan_cache_enabled=True, voyage_api_key="  ")  # type: ignore[call-arg]
+    assert without_key.plan_cache_active is False
+    assert "VOYAGE_API_KEY is not set" in caplog.text
 
-    enabled = PlanCacheSettings(_env_file=None, plan_cache_enabled=True, voyage_api_key="k")  # type: ignore[call-arg]
-    assert enabled.voyage_api_key is not None
+    with_key = PlanCacheSettings(_env_file=None, plan_cache_enabled=True, voyage_api_key="k")  # type: ignore[call-arg]
+    assert with_key.plan_cache_active is True

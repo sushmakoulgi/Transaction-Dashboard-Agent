@@ -757,7 +757,7 @@ class PlanCache:                              # the flow in 7.4; used by the /ch
       slot_values: dict[str, str]    # {"customer_id": "10001641"}
       is_self_contained: bool        # False for follow-ups ("does it have a refund?") → agent
   ```
-- Slots are concrete values the user typed: IDs, merchant names, amounts, explicit dates, statuses. Relative dates stay as words ("this month") because the Transaction Service resolves them at run time, so a stored plan stays correct as months change.
+- Slots are concrete values the user typed: IDs, merchant names, amounts, explicit dates, statuses. Haiku returns them as a list of `{name, value}`; the answer is used only if every value appears in the question (case-insensitive) and the template's `{placeholders}` name exactly those slots. Relative dates stay as words ("this month") because the Transaction Service resolves them at run time, so a stored plan stays correct as months change.
 - The template text is normalized (lowercase, single spaces, no trailing punctuation) before it is embedded or compared.
 
 ### 7.3 Stored template (Chroma)
@@ -785,7 +785,7 @@ class StoredPlanTemplate(BaseModel):
    - the question was self-contained, and
    - the best similarity found in step 2 was **below** `PLAN_HIT_THRESHOLD` (a new shape; near-duplicates are not stored again).
    Slot values in the plan are replaced with `{"$slot": ...}` markers before storing.
-- `PLAN_CACHE_ENABLED=false` turns the whole thing off. Any cache error falls back to the agent; the cache never fails a request.
+- `PLAN_CACHE_ENABLED=false` turns the whole thing off. A missing `VOYAGE_API_KEY` also turns it off (a warning is logged; the service still starts). Any cache error at run time (Voyage, Chroma or Haiku unavailable) falls back to the agent, counted as a miss `unavailable`; the cache never fails or pauses a request.
 
 ### 7.5 Metrics (`GET /api/metrics/plan-cache`)
 ```json
@@ -999,8 +999,8 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 ### Phase 2a — Plan RAG
 | ID | Task | Size | Depends | Acceptance |
 |---|---|---|---|---|
-| P2a-1 | `EmbeddingProvider` Protocol + `VoyageEmbeddingProvider`; settings (`VOYAGE_API_KEY`, model, `PLAN_CACHE_ENABLED`, `PLAN_HIT_THRESHOLD`) | S | P0-3 | One input type for both sides. Retries on 429/5xx/network, not on 4xx. Off by default; on without a key fails at startup ✅ |
-| P2a-2 | `QueryTemplateExtractor` (Haiku, structured output, session-context aware) + template normalization | M | P1c-1 | Extraction tests: slots found; follow-up without context → `is_self_contained=False` |
+| P2a-1 | `EmbeddingProvider` Protocol + `VoyageEmbeddingProvider`; settings (`VOYAGE_API_KEY`, model, `PLAN_CACHE_ENABLED`, `PLAN_HIT_THRESHOLD`) | S | P0-3 | One input type for both sides. Retries on 429/5xx/network, not on 4xx. Off by default; enabled without a key still starts (warning logged, every question goes to Claude) ✅ |
+| P2a-2 | `QueryTemplateExtractor` (Haiku, structured output, session-context aware) + template normalization | M | P1c-1 | Extraction tests: slots found; follow-up without context → `is_self_contained=False`. Slot values must appear in the question and match the template's placeholders, else the agent answers ✅ |
 | P2a-3 | `StoredPlanTemplate` + `SlotSubstitutor` (+ de-substitution of a recorded plan) | M | P1c-6 | Round trip: plan → template → substituted plan is identical |
 | P2a-4 | Chroma in the default compose stack + `ChromaPlanStore` (nearest, add, record_hit) | M | P2a-1, P2a-3 | Similar phrasings hit; different intents miss at 0.90 |
 | P2a-5 | `PlanCacheMetrics` persisted in Chroma + `GET /api/metrics/plan-cache` | S | P2a-4 | Counters survive an agent restart; exact vs similar hits counted separately |
