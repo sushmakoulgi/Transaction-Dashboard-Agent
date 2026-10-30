@@ -1,7 +1,7 @@
 """Turns MCP tool listings into Anthropic tool definitions.
 
 Tools are sorted by name so the tool list (the start of every prompt) is byte-identical
-between requests, which prompt caching needs.
+between requests.
 """
 
 from collections.abc import Iterable

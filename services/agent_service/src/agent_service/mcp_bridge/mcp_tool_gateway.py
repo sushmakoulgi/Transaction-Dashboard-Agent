@@ -75,7 +75,7 @@ class McpToolGateway:
 
     @property
     def tool_definitions(self) -> tuple[BetaToolParam, ...]:
-        """The tools for Claude, sorted by name (stable for prompt caching)."""
+        """The tools for Claude, sorted by name (stable between requests)."""
         return self._tool_definitions
 
     @property

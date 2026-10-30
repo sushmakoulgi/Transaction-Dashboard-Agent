@@ -2,6 +2,7 @@
 
 - Model, effort and token limits come from `ClaudeSettings`; thinking is left at the model's
   default (always on for Claude Opus 5.5), and only `tool_choice: auto` is used.
+- Prompt caching is not used (no `cache_control`).
 - Refusals are opted into server-side fallbacks (`fallbacks: "default"`), and every
   `stop_reason` is checked before the content is used.
 - SDK errors are mapped to a few agent-level errors, most specific first.
@@ -115,7 +116,6 @@ class ClaudeClient:
                 tools=list(tools),
                 tool_choice={"type": "auto"},
                 output_config={"effort": self._settings.planner_effort},
-                cache_control={"type": "ephemeral"},
             )
         except anthropic.APIError as error:
             raise to_claude_error(error) from error

@@ -594,7 +594,7 @@ class QueryPlan(ContractModel):
 - **`ClaudeClient.create_message(system, messages, tools) -> ClaudeReply`** calls `client.beta.messages.create(...)` with:
   - **No `thinking` parameter.** Thinking is always on for Claude Opus 5.5; disabling it or setting a budget returns a 400.
   - **`tool_choice={"type": "auto"}` only.** Forced `any` / `tool` returns a 400 on this model, so the system prompt steers tool use.
-  - **`output_config={"effort": ...}`**, plus `cache_control={"type": "ephemeral"}` for automatic prompt caching of the stable tools + system prefix.
+  - **`output_config={"effort": ...}`**. Prompt caching is **not** used (no `cache_control`; removed 2026-10-29 at the user's request).
   - **`fallbacks="default"`** with beta `server-side-fallback-2026-07-01` (on by default, configurable). A declined request is re-run server-side on Anthropic's recommended fallback model for that refusal category.
 - **Stop reasons are checked before reading content:**
   - `end_turn`, `tool_use` and `stop_sequence` are accepted.
@@ -703,7 +703,7 @@ class SessionStore(Protocol):
   - **`tool_definitions`** are the Anthropic tool definitions, sorted by name.
   - **`call_tool(name, arguments) -> ToolCallOutcome(is_error, text, structured_content)`** never raises for tool or transport failures; Claude gets them as error results. It rejects names that are not in the discovered list without calling the server, and returns tool errors (e.g. the JSON `ErrorResponse`) and transport failures as `is_error=True`.
   - A per-call timeout comes from `MCP_TOOL_CALL_TIMEOUT_SECONDS` (default 30 s).
-- **`ToolDefinitionMapper`** (`tool_definition_mapper.py`) maps each MCP `Tool` to `{name, description (or title, or name), input_schema}`, sorted by name. The tool list is then byte-identical between requests, which prompt caching needs.
+- **`ToolDefinitionMapper`** (`tool_definition_mapper.py`) maps each MCP `Tool` to `{name, description (or title, or name), input_schema}`, sorted by name. The tool list is then byte-identical between requests.
   - It deep-copies each schema without pydantic's OpenAPI-only `discriminator` keyword. The `oneOf` alternatives (each with a fixed `kind`) keep the same meaning.
 - **`McpConnectionSettings`** holds `MCP_SERVER_URL` (default `http://localhost:8100/mcp`) and `MCP_API_TOKEN` (required while `AUTH_ENABLED`).
 - **Tests:**
@@ -988,7 +988,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1c-5 | `QueryAgent` loop: parallel tool calls, compact tool results, error tool_results, max iterations | L | P1c-1..4 | Scripted tests: success, validation-retry, iteration cap ✅ |
 | P1c-6 | `QueryPlanRecorder` + `PlanExecutor` | M | P1c-5 | Re-running a recorded plan returns the same page 1 as the agent did ✅ |
 | P1c-7 | Routes: `/chat`, `/plans/execute`, `/transactions/{id}`, sessions; CORS for UI | M | P1c-6 | OpenAPI. Session ID created when absent ✅ |
-| P1c-9 | Live natural-language eval (~25 prompts covering UC1–5, follow-ups, OR/NOT phrasing) | M | P1c-7 | ≥ 90% choose the correct tool and filters; `cache_read_input_tokens` > 0 from the second request |
+| P1c-9 | Live natural-language eval (~25 prompts covering UC1–5, follow-ups, OR/NOT phrasing) | M | P1c-7 | ≥ 90% choose the correct tool and filters |
 
 ### Phase 1d — UI
 | ID | Task | Size | Depends | Acceptance |

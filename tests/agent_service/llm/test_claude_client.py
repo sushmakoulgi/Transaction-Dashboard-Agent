@@ -94,7 +94,7 @@ async def test_sends_the_configured_model_effort_and_auto_tool_choice() -> None:
     assert body["max_tokens"] == 16000
     assert body["output_config"] == {"effort": "medium"}
     assert body["tool_choice"] == {"type": "auto"}
-    assert body["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in body  # prompt caching is not used
     assert body["tools"][0]["name"] == "search_transactions"
     assert body["system"] == SYSTEM
     assert body["messages"] == MESSAGES

@@ -1,8 +1,8 @@
 """What Claude is told on every turn.
 
 `SYSTEM_PROMPT` never changes between requests (no dates, IDs or counts in it), so the tools +
-system prefix stays byte-identical and prompt caching works. Today's date goes in a
-mid-conversation system message instead.
+system prefix stays byte-identical. Today's date goes in a mid-conversation system message
+instead.
 """
 
 from anthropic.types.beta import BetaTextBlockParam

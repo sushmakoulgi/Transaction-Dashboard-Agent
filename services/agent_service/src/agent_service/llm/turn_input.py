@@ -3,7 +3,7 @@
     [user:   <previous_questions>...</previous_questions><current_question>...</current_question>,
      system: Today is Tuesday, 2026-10-27 (America/New_York) ...]
 
-The date is a mid-conversation system message (not part of the cached system prompt). It
+The date is a mid-conversation system message (not part of the fixed system prompt). It
 follows the user message, and later turns of the tool loop follow it with assistant messages.
 """
 
