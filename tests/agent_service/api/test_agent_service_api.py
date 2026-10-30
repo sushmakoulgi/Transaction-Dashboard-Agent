@@ -11,7 +11,7 @@ from agent_test_helpers import ScriptedClaude, final_answer, reply_with, tool_us
 from filter_test_helpers import condition
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from sqlalchemy.exc import OperationalError
 
 from agent_service.llm.claude_client import (
@@ -42,26 +42,29 @@ CHARGEBACK_SEARCH = {"filter": condition("has_chargeback", "exists", True), "pag
 
 def agent_settings(auth_enabled: bool = True, **overrides: Any) -> AgentServiceSettings:
     """Explicit settings, so a local .env can't change the tests."""
-    return AgentServiceSettings(
-        auth_enabled=auth_enabled,
-        agent_api_token=SecretStr(AGENT_TOKEN) if auth_enabled else None,
-        mcp_api_token=SecretStr("mcp-token-0123456789abcdef") if auth_enabled else None,
-        transaction_service_url="http://transaction-service",  # type: ignore[arg-type]
-        transaction_service_api_token=SERVICE_TOKEN,
-        anthropic_api_key=None,
+    values: dict[str, Any] = {
+        "auth_enabled": auth_enabled,
+        "agent_api_token": SecretStr(AGENT_TOKEN) if auth_enabled else None,
+        "mcp_api_token": SecretStr("mcp-token-0123456789abcdef") if auth_enabled else None,
+        "transaction_service_url": "http://transaction-service",
+        "transaction_service_api_token": SERVICE_TOKEN,
+        "anthropic_api_key": None,
         # No real Chroma: the plan cache's counters and templates stay untouched.
-        chroma_url="http://127.0.0.1:9",  # type: ignore[arg-type]
-        chroma_timeout_seconds=1.0,
-        **overrides,
-    )
+        "chroma_url": "http://127.0.0.1:9",
+        "chroma_timeout_seconds": 1.0,
+    }
+    return AgentServiceSettings(**(values | overrides))
 
 
 @asynccontextmanager
 async def agent_api(
     claude_replies: Sequence[ClaudeReply | Exception],
     auth_enabled: bool = True,
+    mcp_in_process: bool = False,
     plan_cache_parts: PlanCacheParts | None = None,
 ) -> AsyncIterator[tuple[httpx.AsyncClient, ScriptedClaude]]:
+    """`mcp_in_process` lets the app build its own MCP server (MCP_TRANSPORT=in_process)
+    instead of being handed the test one."""
     service_app = create_transaction_service_app(
         TransactionServiceSettings(
             postgres_dsn_readonly=DatabaseSettings().postgres_dsn_readonly,
@@ -81,9 +84,9 @@ async def agent_api(
     )
     claude = ScriptedClaude(claude_replies)
     app = create_app(
-        agent_settings(auth_enabled),
+        agent_settings(auth_enabled, mcp_transport="in_process" if mcp_in_process else "http"),
         claude=claude,
-        mcp_client_factory=lambda: Client(mcp_server),
+        mcp_client_factory=None if mcp_in_process else lambda: Client(mcp_server),
         transaction_service_transport=service_transport,
         plan_cache_parts=plan_cache_parts,
     )
@@ -247,6 +250,22 @@ async def test_waits_for_an_mcp_server_that_starts_later() -> None:
     async with app.router.lifespan_context(app):
         pass
     assert len(attempts) == 2
+
+
+async def test_in_process_mcp_server_answers_without_an_mcp_endpoint() -> None:
+    async with agent_api(searches_then_answers(), mcp_in_process=True) as (client, _):
+        response = await chat(client, "Which transactions have chargebacks?")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query_plan"]["steps"][0]["tool_name"] == "search_transactions"
+    assert body["result_page"]["total_count"] == 15
+
+
+def test_mcp_token_is_required_over_http_only() -> None:
+    with pytest.raises(ValidationError, match="MCP_API_TOKEN"):
+        agent_settings(mcp_transport="http", mcp_api_token=None)
+    settings = agent_settings(mcp_transport="in_process", mcp_api_token=None)
+    assert settings.mcp_api_token is None
 
 
 # --- Chat, sessions, paging, detail ---

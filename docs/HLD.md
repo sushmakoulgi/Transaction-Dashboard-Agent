@@ -34,7 +34,7 @@ Let a user ask questions about payment transactions in natural language ("show c
 | R4 | Extend with new filters easily | **Filter registry**: one entry per filterable field, including JSON paths. No other code changes |
 | R5 | Read-only APIs, no SQL injection | The LLM never writes SQL. Filters are checked against a whitelist and compiled to parameterized SQLAlchemy. Read-only DB role |
 | R6 | LLM checks the WHERE clause before running it | `validate_filters` tool, and structured validation errors from every search call so the LLM can correct itself |
-| R7 | APIs exposed over MCP, usable by outside clients | **Separate MCP server** (FastMCP, Streamable HTTP, bearer token) |
+| R7 | APIs exposed over MCP | **MCP server** (FastMCP) used only by the agent, never by outside clients (§11.9). Runs as its own service over Streamable HTTP with a bearer token, or inside the agent (`MCP_TRANSPORT=in_process`) with no network endpoint |
 | R8 | Agent in front of the APIs; natural-language input | Agent Service runs a Claude tool-use loop and is an MCP client |
 | R9 | Session memory and context | In-memory session store (Phase 1), single user. **Only the user's questions and each question's query plan (tool + filters) are stored.** Query results, tool results and assistant replies are never saved |
 | R10 | Paginated UI | React. Paging reuses the returned **query plan** and **skips the LLM** |
@@ -49,12 +49,11 @@ Let a user ask questions about payment transactions in natural language ("show c
 flowchart LR
     subgraph Client
         UI[React UI<br/>chat + results table]
-        EXT[External MCP clients<br/>e.g. Claude Desktop]
     end
 
     subgraph Backend
         AG[Agent Service<br/>FastAPI :8000<br/>Claude loop · session memory · plan executor]
-        MCP[MCP Server<br/>FastMCP :8100<br/>Streamable HTTP]
+        MCP[MCP Server<br/>FastMCP :8100, internal only<br/>Streamable HTTP or in-process]
         TS[Transaction Service<br/>FastAPI :8200<br/>SELECT only]
     end
 
@@ -70,7 +69,6 @@ flowchart LR
     UI -- "chat / execute plan / detail" --> AG
     AG -- "messages + tools" --> CL
     AG -- "MCP tool calls" --> MCP
-    EXT -- "MCP tool calls" --> MCP
     MCP -- "HTTP/JSON" --> TS
     AG -- "plan execute (paging, cache hits)" --> TS
     TS --> PG
@@ -85,14 +83,14 @@ flowchart LR
 |---|---|---|
 | **React UI** | Chat panel, results table, pager, detail drawer (P2). Holds the current `query_plan` | Call the LLM or MCP directly |
 | **Agent Service** (BFF) | `/chat`: runs the Claude tool-use loop over the MCP tools and returns reply + query plan + first page. `/plans/execute`: re-runs a plan for page N without the LLM. Session memory. P2: plan resolution (Redis → Chroma → LLM) | Touch Postgres or build SQL |
-| **MCP Server** | Publishes the tool catalog with JSON schemas. Thin adapter that forwards to the Transaction Service. Bearer-token auth for outside clients | Hold business logic |
+| **MCP Server** | Publishes the tool catalog with JSON schemas. Thin adapter that forwards to the Transaction Service. Internal: reached only by the agent (bearer token over HTTP, or in memory) | Hold business logic or accept outside clients |
 | **Transaction Service** | Owns the domain: filter registry, validation, query building, pagination, detail aggregates | Accept writes or raw SQL |
 | **Postgres** | System of record | — |
 | **Redis** (P2) | Exact-match plan cache with TTL. Optional session store later | — |
 | **ChromaDB** (P2) | Vector store of query templates → parameterized plans | — |
 
 ### 4.2 Why these boundaries
-- **MCP server separate from the Transaction Service:** outside MCP clients reach the same tools, and the Transaction Service stays a plain REST service that can be tested on its own.
+- **MCP server separate from the Transaction Service:** the tool catalog stays a thin, swappable layer, and the Transaction Service stays a plain REST service that can be tested on its own. The MCP server is **not** offered to outside clients such as Claude Desktop (§11.9); in a deployment it has no public route.
 - **Agent Service also acts as the UI's backend (BFF):** the UI talks to one origin. Paging and cache hits go to the Transaction Service directly, with no MCP or LLM hop.
 - **Agent is its own MCP client:** the Claude API's built-in MCP connector needs a publicly reachable server. Our MCP server runs locally in docker-compose, so the agent connects with the Python `mcp` SDK and passes the tools to Claude as ordinary tool definitions. The tool-use loop is ours, which also lets us capture the query plan.
 
@@ -227,7 +225,7 @@ erDiagram
 | 4. SQL | SQLAlchemy Core expressions with bound parameters only. No `text()` built from input |
 | 5. Database | `app_readonly` role with `SELECT` grants only. `default_transaction_read_only = on`. `statement_timeout = 5s` |
 | 6. Resource limits | `page_size ≤ 100`. Sorting only on whitelisted fields. Agent loop limited to a maximum number of iterations |
-| 7. Transport | MCP server and Transaction Service require a bearer token while `AUTH_ENABLED=true` (the default). `AUTH_ENABLED=false` turns the check off everywhere for local testing and logs a warning. Secrets only in `.env`, which git ignores |
+| 7. Transport | MCP server and Transaction Service are internal only: no public route, reachable only from the agent (and the MCP server, for the Transaction Service). With `MCP_TRANSPORT=in_process` the MCP server has no endpoint at all. Both require a bearer token while `AUTH_ENABLED=true` (the default). `AUTH_ENABLED=false` turns the check off everywhere for local testing and logs a warning. Secrets only in `.env`, which git ignores |
 | 8. Validation loop | The LLM gets precise validation errors and fixes the query itself (R6). The validator always decides; the LLM is never the security boundary |
 
 ## 8. Technology choices
@@ -278,6 +276,9 @@ erDiagram
    - Searches without a date filter are still limited to the current year (on `transaction_date` / `opened_at`), and so is the detail lookup.
    - The sample data never goes before Jan 1.
 8. **Chargeback event types** (assumed, can be changed in seed and enum): `OPENED`, `EVIDENCE_REQUESTED`, `EVIDENCE_SUBMITTED`, `REPRESENTMENT`, `PRE_ARBITRATION`, `ARBITRATION`, `WON`, `LOST`, `ACCEPTED`.
+9. **The MCP server is internal (2026-10-29).** Outside MCP clients such as Claude Desktop are not supported; only the agent calls the tools.
+   - `MCP_TRANSPORT=http` (default, docker-compose): a separate MCP server, reachable only inside the private network, with `MCP_API_TOKEN`.
+   - `MCP_TRANSPORT=in_process`: the agent builds the same MCP server and connects in memory, so there is no MCP endpoint, URL or token. This suits deployments such as AWS Lambda, where a function URL would otherwise be public.
 
 ## 12. Risks
 

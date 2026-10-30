@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from mcp import Client
+from mcp.server.mcpserver import MCPServer
 
 from agent_service.agent.query_agent import ClaudeMessenger, QueryAgent
 from agent_service.api.dependencies import AgentServiceContainer
@@ -35,6 +36,8 @@ from agent_service.plan_cache.plan_cache_metrics import PlanCacheMetrics
 from agent_service.plan_cache.query_template_extractor import QueryTemplateExtractor
 from agent_service.plan_execution.plan_executor import PlanExecutor
 from agent_service.settings import AgentServiceSettings
+from mcp_server.main import McpServerResources, create_mcp_server
+from mcp_server.settings import McpServerSettings
 from shared.clients.transaction_service_client import TransactionServiceClient
 from shared.clock import Clock, SystemClock
 from shared.contracts import HealthStatus
@@ -59,6 +62,24 @@ async def connect_waiting_for_mcp_server(
                 raise
             logger.info("MCP server not reachable yet; retrying")
             await asyncio.sleep(MCP_CONNECT_RETRY_INTERVAL_SECONDS)
+
+
+def in_process_mcp_server(
+    settings: AgentServiceSettings,
+    transaction_service_transport: httpx.AsyncBaseTransport | None = None,
+) -> MCPServer[McpServerResources]:
+    """The MCP server for MCP_TRANSPORT=in_process: the same tools, reached in memory instead
+    of over HTTP. It has no endpoint, so its own bearer check is off; its calls to the
+    Transaction Service still send TRANSACTION_SERVICE_API_TOKEN."""
+    return create_mcp_server(
+        McpServerSettings(
+            auth_enabled=False,
+            mcp_api_token=None,
+            transaction_service_url=settings.transaction_service_url,
+            transaction_service_api_token=settings.transaction_service_api_token,
+        ),
+        transaction_service_transport,
+    )
 
 
 @dataclass(frozen=True)
@@ -127,6 +148,11 @@ def create_app(
                 if mcp_client_factory is not None:
                     return McpToolGateway(
                         mcp_client_factory, service_settings.mcp_tool_call_timeout_seconds
+                    )
+                if service_settings.mcp_transport == "in_process":
+                    server = in_process_mcp_server(service_settings, transaction_service_transport)
+                    return McpToolGateway(
+                        lambda: Client(server), service_settings.mcp_tool_call_timeout_seconds
                     )
                 return McpToolGateway.connect_to(
                     str(service_settings.mcp_server_url),

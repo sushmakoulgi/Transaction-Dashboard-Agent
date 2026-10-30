@@ -7,11 +7,13 @@ dependencies = [
     "anthropic>=1.0",
     "chromadb-client>=1.5.9,<2",
     "mcp>=2.3",
+    "mcp-server",  # MCP_TRANSPORT=in_process runs the MCP server inside the agent
     "pydantic-settings>=2.6",
     "shared",
 ]
 
 [tool.uv.sources]
+mcp-server = { workspace = true }
 shared = { workspace = true }
 
 [build-system]

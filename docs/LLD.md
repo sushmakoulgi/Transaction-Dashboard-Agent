@@ -526,7 +526,7 @@ class SearchableRepository[ItemT]:
 
   Arguments that break the JSON schema itself (e.g. `page_size` 1000) are rejected by the SDK before the tool runs.
 - **`validate_filters`** never raises for an invalid filter. It returns `is_valid=false` with the issues, including shape problems.
-- Auth: `Authorization: Bearer <MCP_API_TOKEN>` is checked by middleware. The token is shared by the agent and outside clients (single user).
+- Auth: `Authorization: Bearer <MCP_API_TOKEN>` is checked by middleware. Only the agent holds the token; the server is internal and not offered to outside clients (HLD §11.9).
 - **`TransactionServiceClient`** (`shared/clients/transaction_service_client.py`) is shared by the MCP server and the agent's `PlanExecutor`.
   - It is one `httpx.AsyncClient` with the bearer token, a 10 s timeout, and typed methods for every endpoint, returning the shared contract models.
   - **Retries:** every endpoint only reads data, so every call (including POST searches) is safe to retry. Retries happen on connection errors, timeouts and 502/503/504, up to 2 times with exponential backoff. 4xx and other 5xx responses are never retried.
@@ -706,7 +706,11 @@ class SessionStore(Protocol):
   - A per-call timeout comes from `MCP_TOOL_CALL_TIMEOUT_SECONDS` (default 30 s).
 - **`ToolDefinitionMapper`** (`tool_definition_mapper.py`) maps each MCP `Tool` to `{name, description (or title, or name), input_schema}`, sorted by name. The tool list is then byte-identical between requests.
   - It deep-copies each schema without pydantic's OpenAPI-only `discriminator` keyword. The `oneOf` alternatives (each with a fixed `kind`) keep the same meaning.
-- **`McpConnectionSettings`** holds `MCP_SERVER_URL` (default `http://localhost:8100/mcp`) and `MCP_API_TOKEN` (required while `AUTH_ENABLED`).
+- **`McpConnectionSettings`** holds `MCP_TRANSPORT`, `MCP_SERVER_URL` (default `http://localhost:8100/mcp`) and `MCP_API_TOKEN` (required while `AUTH_ENABLED` and the transport is `http`).
+- **`MCP_TRANSPORT`** (`agent_service/main.py`):
+  - `http` (default): `connect_to(MCP_SERVER_URL, MCP_API_TOKEN)` as above.
+  - `in_process`: `in_process_mcp_server(settings)` builds the MCP server with `create_mcp_server` (same tools, same lifespan) and the gateway connects with the SDK's in-memory `Client(server)`. There is no MCP endpoint, so the server's own bearer check is off and `MCP_SERVER_URL` / `MCP_API_TOKEN` are unused; its calls to the Transaction Service still send `TRANSACTION_SERVICE_API_TOKEN`. `agent-service` depends on the `mcp-server` package for this.
+  - A test runs `/api/chat` end to end with `in_process` and no injected MCP client.
 - **Tests:**
   - The mapper is tested on the real MCP server's listing (sorted, stable between listings, recursive filter schema kept, no `discriminator`).
   - The gateway is tested against an in-memory test MCP server (success with structured content, tool error, unknown tool, invalid arguments, not connected, unreachable server).
@@ -899,6 +903,7 @@ POSTGRES_DSN_READONLY=postgresql+asyncpg://app_readonly:***@postgres:5432/transa
 POSTGRES_DSN_OWNER=postgresql+psycopg://app_owner:***@postgres:5432/transactions
 TRANSACTION_SERVICE_URL=http://transaction-service:8200
 TRANSACTION_SERVICE_API_TOKEN=***
+MCP_TRANSPORT=http             # or in_process: no MCP endpoint (URL and token unused)
 MCP_SERVER_URL=http://mcp-server:8100/mcp
 MCP_API_TOKEN=***
 ANTHROPIC_API_KEY=***
