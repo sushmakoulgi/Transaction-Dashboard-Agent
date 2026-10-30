@@ -6,26 +6,22 @@ names, the plan template (JSON) and the hit counter. Distances are cosine, so
 similarity = 1 - distance.
 
 Every Chroma failure is raised as `PlanStoreUnavailableError`; the caller then lets the
-agent answer, so a stopped Chroma never fails a question. The Chroma client sets no request
-timeout of its own, so every call here runs under `timeout_seconds`.
+agent answer, so a stopped Chroma never fails a question.
 """
 
-import asyncio
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Self
+from typing import Any
 
-import chromadb
-from chromadb.api.async_api import AsyncClientAPI
-from chromadb.api.models.AsyncCollection import AsyncCollection
-from chromadb.config import Settings as ChromaSettings
-from pydantic import AnyHttpUrl, ValidationError
+from pydantic import ValidationError
 
+from agent_service.plan_cache.chroma_connection import ChromaConnection, PlanStoreUnavailableError
 from agent_service.plan_cache.slot_substitutor import StoredPlanTemplate
 
 TEMPLATES_COLLECTION = "query_plan_templates"
+MAX_TEMPLATES_RANKED = 10_000  # top_templates reads at most this many records
 
 
 @dataclass(frozen=True)
@@ -34,52 +30,26 @@ class PlanMatch:
     similarity: float  # 1.0 for the same embedding
 
 
-class PlanStoreUnavailableError(Exception):
-    """Chroma could not be reached or answered unexpectedly."""
-
-
 class ChromaPlanStore:
     def __init__(
-        self,
-        client: AsyncClientAPI,
-        timeout_seconds: float = 5.0,
-        collection_name: str = TEMPLATES_COLLECTION,
+        self, connection: ChromaConnection, collection_name: str = TEMPLATES_COLLECTION
     ) -> None:
-        self._client = client
-        self._timeout_seconds = timeout_seconds
+        self._connection = connection
         self._collection_name = collection_name
-        self._collection: AsyncCollection | None = None
-
-    @classmethod
-    async def connect(
-        cls, url: AnyHttpUrl, timeout_seconds: float, collection_name: str = TEMPLATES_COLLECTION
-    ) -> Self:
-        try:
-            async with asyncio.timeout(timeout_seconds):
-                client = await chromadb.AsyncHttpClient(
-                    host=url.host or "localhost",
-                    port=url.port or 8000,
-                    ssl=url.scheme == "https",
-                    settings=ChromaSettings(anonymized_telemetry=False),
-                )
-        except Exception as error:  # the client raises many types; all mean "not usable"
-            raise PlanStoreUnavailableError(f"Chroma is not reachable: {error!r}") from error
-        return cls(client, timeout_seconds, collection_name)
 
     async def nearest(self, embedding: list[float]) -> PlanMatch | None:
         """The most similar stored template, or None while nothing is stored."""
-        collection = await self._templates()
-        try:
-            async with asyncio.timeout(self._timeout_seconds):
-                if await collection.count() == 0:
-                    return None
-                result = await collection.query(
-                    query_embeddings=as_batch(embedding),
-                    n_results=1,
-                    include=["documents", "metadatas", "distances"],
-                )
-        except Exception as error:
-            raise PlanStoreUnavailableError(f"Chroma query failed: {error!r}") from error
+        collection = await self._connection.collection(self._collection_name)
+        if await self._connection.run(collection.count, "count") == 0:
+            return None
+        result = await self._connection.run(
+            lambda: collection.query(
+                query_embeddings=as_batch(embedding),
+                n_results=1,
+                include=["documents", "metadatas", "distances"],
+            ),
+            "query",
+        )
         ids, distances = result["ids"][0], (result["distances"] or [[]])[0]
         if not ids:
             return None
@@ -90,46 +60,49 @@ class ChromaPlanStore:
 
     async def add(self, template: StoredPlanTemplate, embedding: list[float]) -> None:
         """Stores the template (replacing one with the same id)."""
-        collection = await self._templates()
-        try:
-            async with asyncio.timeout(self._timeout_seconds):
-                await collection.upsert(
-                    ids=[template.template_id],
-                    embeddings=as_batch(embedding),
-                    documents=[template.template_text],
-                    metadatas=[metadata_of(template)],
-                )
-        except Exception as error:
-            raise PlanStoreUnavailableError(f"Chroma upsert failed: {error!r}") from error
+        collection = await self._connection.collection(self._collection_name)
+        await self._connection.run(
+            lambda: collection.upsert(
+                ids=[template.template_id],
+                embeddings=as_batch(embedding),
+                documents=[template.template_text],
+                metadatas=[metadata_of(template)],
+            ),
+            "upsert",
+        )
 
     async def record_hit(self, template_id: str, now: datetime) -> None:
-        collection = await self._templates()
-        try:
-            async with asyncio.timeout(self._timeout_seconds):
-                stored = await collection.get(ids=[template_id], include=["metadatas"])
-                if not stored["ids"]:
-                    return  # removed meanwhile: nothing to count
-                previous = (stored["metadatas"] or [{}])[0].get("hit_count")
-                hit_count = (previous if isinstance(previous, int) else 0) + 1
-                await collection.update(
-                    ids=[template_id],
-                    metadatas=[{"hit_count": hit_count, "last_used_at": now.isoformat()}],
-                )
-        except Exception as error:
-            raise PlanStoreUnavailableError(f"Chroma update failed: {error!r}") from error
+        collection = await self._connection.collection(self._collection_name)
+        stored = await self._connection.run(
+            lambda: collection.get(ids=[template_id], include=["metadatas"]), "get"
+        )
+        if not stored["ids"]:
+            return  # removed meanwhile: nothing to count
+        previous = (stored["metadatas"] or [{}])[0].get("hit_count")
+        hit_count = (previous if isinstance(previous, int) else 0) + 1
+        await self._connection.run(
+            lambda: collection.update(
+                ids=[template_id],
+                metadatas=[{"hit_count": hit_count, "last_used_at": now.isoformat()}],
+            ),
+            "update",
+        )
 
-    async def _templates(self) -> AsyncCollection:
-        if self._collection is None:
-            try:
-                async with asyncio.timeout(self._timeout_seconds):
-                    self._collection = await self._client.get_or_create_collection(
-                        self._collection_name,
-                        configuration={"hnsw": {"space": "cosine"}},
-                        embedding_function=None,  # embeddings come from Voyage
-                    )
-            except Exception as error:
-                raise PlanStoreUnavailableError(f"Chroma is not usable: {error!r}") from error
-        return self._collection
+    async def top_templates(self, limit: int) -> list[StoredPlanTemplate]:
+        """The most used templates, most hits first."""
+        collection = await self._connection.collection(self._collection_name)
+        stored = await self._connection.run(
+            lambda: collection.get(include=["documents", "metadatas"], limit=MAX_TEMPLATES_RANKED),
+            "get",
+        )
+        templates = [
+            template_from_record(template_id, document, metadata)
+            for template_id, document, metadata in zip(
+                stored["ids"], stored["documents"] or [], stored["metadatas"] or [], strict=True
+            )
+        ]
+        templates.sort(key=lambda template: (-template.hit_count, template.template_text))
+        return templates[:limit]
 
 
 def as_batch(embedding: list[float]) -> list[Sequence[float]]:

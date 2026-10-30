@@ -1,5 +1,6 @@
 """The agent service API used by the React UI."""
 
+import contextlib
 import uuid
 from typing import Annotated, Any
 
@@ -10,10 +11,18 @@ from agent_service.api.schemas import (
     ChatRequest,
     ChatResponse,
     ExecutePlanRequest,
+    PlanCacheHits,
+    PlanCacheLearned,
+    PlanCacheMetricsResponse,
+    PlanCacheMisses,
     PlanPageResponse,
     ResultPage,
+    TemplateUsage,
 )
 from agent_service.memory.session_store import SessionEntry
+from agent_service.plan_cache.chroma_connection import PlanStoreUnavailableError
+from agent_service.plan_cache.plan_cache_metrics import PlanCacheMetricsSnapshot
+from agent_service.plan_cache.plan_cache_metrics import PlanCacheOutcome as Outcome
 from shared.contracts import (
     ChargebackSummary,
     ErrorResponse,
@@ -32,6 +41,7 @@ ERRORS: dict[int | str, dict[str, Any]] = {
 }
 
 router = APIRouter(prefix="/api")
+TOP_TEMPLATES_SHOWN = 10
 
 
 @router.post("/chat", response_model=ChatResponse, responses=ERRORS)
@@ -82,6 +92,58 @@ async def delete_session(session_id: str, container: Container) -> Response:
     """Forget a session (for example, a 'new conversation' button)."""
     await container.sessions.delete_session(session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/metrics/plan-cache", response_model=PlanCacheMetricsResponse)
+async def plan_cache_metrics(container: Container) -> PlanCacheMetricsResponse:
+    """Plan cache hits (exact vs similar), misses by reason and what was learned, since the
+    first recorded question. Available even while the cache is off or Chroma is down."""
+    snapshot = await container.plan_cache_metrics.snapshot()
+    top_templates: list[TemplateUsage] = []
+    # Without the template list, the counters are still worth showing.
+    with contextlib.suppress(PlanStoreUnavailableError):
+        if snapshot.store_available:
+            top_templates = [
+                TemplateUsage(
+                    template_text=template.template_text,
+                    hit_count=template.hit_count,
+                    last_used_at=template.last_used_at,
+                )
+                for template in await container.plan_store.top_templates(TOP_TEMPLATES_SHOWN)
+            ]
+    return to_metrics_response(snapshot, container.plan_cache_active, top_templates)
+
+
+def to_metrics_response(
+    snapshot: PlanCacheMetricsSnapshot, enabled: bool, top_templates: list[TemplateUsage]
+) -> PlanCacheMetricsResponse:
+    def count(outcome: Outcome) -> int:
+        return snapshot.counts[outcome]
+
+    return PlanCacheMetricsResponse(
+        enabled=enabled,
+        store_available=snapshot.store_available,
+        since=snapshot.since,
+        lookups=snapshot.lookups,
+        hits=PlanCacheHits(exact=count(Outcome.HIT_EXACT), similar=count(Outcome.HIT_SIMILAR)),
+        misses=PlanCacheMisses(
+            no_templates=count(Outcome.MISS_NO_TEMPLATES),
+            below_threshold=count(Outcome.MISS_BELOW_THRESHOLD),
+            follow_up=count(Outcome.MISS_FOLLOW_UP),
+            missing_slot=count(Outcome.MISS_MISSING_SLOT),
+            invalid_plan=count(Outcome.MISS_INVALID_PLAN),
+            unavailable=count(Outcome.MISS_UNAVAILABLE),
+        ),
+        learned=PlanCacheLearned(
+            stored=count(Outcome.STORED),
+            skipped_similar=count(Outcome.SKIPPED_SIMILAR),
+            skipped_unsuccessful=count(Outcome.SKIPPED_UNSUCCESSFUL),
+            skipped_unslottable=count(Outcome.SKIPPED_UNSLOTTABLE),
+        ),
+        hit_rate=snapshot.hit_rate,
+        exact_match_rate=snapshot.exact_match_rate,
+        top_templates=top_templates,
+    )
 
 
 def to_result_page(entity: SearchableEntity, page: dict[str, Any]) -> ResultPage:

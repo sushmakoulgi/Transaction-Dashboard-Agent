@@ -1,5 +1,7 @@
 """Request and response bodies of the agent service API (what the React UI uses)."""
 
+from datetime import datetime
+
 from pydantic import Field
 
 from agent_service.memory.session_store import MAX_QUESTION_LENGTH, SESSION_ID_PATTERN
@@ -39,3 +41,43 @@ class ExecutePlanRequest(ContractModel):
 class PlanPageResponse(ContractModel):
     result_entity: SearchableEntity
     result_page: ResultPage
+
+
+class PlanCacheHits(ContractModel):
+    exact: int  # same normalized template text: what a Redis exact-key cache would catch
+    similar: int  # similarity >= PLAN_HIT_THRESHOLD, different wording
+
+
+class PlanCacheMisses(ContractModel):
+    no_templates: int
+    below_threshold: int
+    follow_up: int
+    missing_slot: int
+    invalid_plan: int
+    unavailable: int  # Voyage, Haiku or Chroma could not be used
+
+
+class PlanCacheLearned(ContractModel):
+    stored: int
+    skipped_similar: int  # a template at least this similar was already stored
+    skipped_unsuccessful: int  # no successful plan, or a follow-up question
+    skipped_unslottable: int  # the plan couldn't be made reusable safely
+
+
+class TemplateUsage(ContractModel):
+    template_text: str
+    hit_count: int
+    last_used_at: datetime | None
+
+
+class PlanCacheMetricsResponse(ContractModel):
+    enabled: bool  # PLAN_CACHE_ENABLED and a VOYAGE_API_KEY
+    store_available: bool  # False: Chroma unreachable; counts are this process's only
+    since: datetime | None
+    lookups: int
+    hits: PlanCacheHits
+    misses: PlanCacheMisses
+    learned: PlanCacheLearned
+    hit_rate: float  # hits / lookups
+    exact_match_rate: float  # exact hits / lookups: decides whether Redis is worth adding
+    top_templates: list[TemplateUsage]

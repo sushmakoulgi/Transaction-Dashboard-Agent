@@ -25,6 +25,9 @@ from agent_service.api.routes import router
 from agent_service.llm.claude_client import ClaudeClient
 from agent_service.mcp_bridge.mcp_tool_gateway import McpServerUnavailableError, McpToolGateway
 from agent_service.memory.session_store import InMemorySessionStore
+from agent_service.plan_cache.chroma_connection import ChromaConnection
+from agent_service.plan_cache.chroma_plan_store import ChromaPlanStore
+from agent_service.plan_cache.plan_cache_metrics import PlanCacheMetrics
 from agent_service.plan_execution.plan_executor import PlanExecutor
 from agent_service.settings import AgentServiceSettings
 from shared.clients.transaction_service_client import TransactionServiceClient
@@ -100,6 +103,10 @@ def create_app(
                 timedelta(minutes=service_settings.session_idle_ttl_minutes),
                 service_clock,
             )
+            # Opened on first use, never at startup: the agent doesn't wait for Chroma.
+            chroma = ChromaConnection(
+                service_settings.chroma_url, service_settings.chroma_timeout_seconds
+            )
             app.state.container = AgentServiceContainer(
                 query_agent=QueryAgent(
                     claude_messenger,
@@ -113,6 +120,9 @@ def create_app(
                 plan_executor=PlanExecutor(transaction_service),
                 sessions=sessions,
                 transaction_service=transaction_service,
+                plan_store=ChromaPlanStore(chroma),
+                plan_cache_metrics=PlanCacheMetrics(chroma, service_clock),
+                plan_cache_active=service_settings.plan_cache_active,
             )
             yield
 

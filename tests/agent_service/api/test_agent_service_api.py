@@ -45,6 +45,9 @@ def agent_settings(auth_enabled: bool = True, **overrides: Any) -> AgentServiceS
         transaction_service_url="http://transaction-service",  # type: ignore[arg-type]
         transaction_service_api_token=SERVICE_TOKEN,
         anthropic_api_key=None,
+        # No real Chroma: the plan cache's counters and templates stay untouched.
+        chroma_url="http://127.0.0.1:9",  # type: ignore[arg-type]
+        chroma_timeout_seconds=1.0,
         **overrides,
     )
 
@@ -118,6 +121,19 @@ async def test_api_is_open_when_auth_is_disabled() -> None:
     async with agent_api([final_answer("hi")], auth_enabled=False) as (client, _):
         response = await client.post("/api/chat", json={"message": "hi"})
     assert response.status_code == 200
+
+
+async def test_plan_cache_metrics_are_served_even_without_chroma() -> None:
+    async with agent_api([]) as (client, _):
+        assert (await client.get("/api/metrics/plan-cache")).status_code == 401
+        response = await client.get("/api/metrics/plan-cache", headers=AUTHORIZED)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled"] is False  # PLAN_CACHE_ENABLED is off by default
+    assert body["store_available"] is False  # Chroma unreachable: nothing stored to show
+    assert body["lookups"] == 0 and body["exact_match_rate"] == 0.0
+    assert body["hits"] == {"exact": 0, "similar": 0}
+    assert body["top_templates"] == []
 
 
 async def test_cors_allows_the_ui_origin_only() -> None:

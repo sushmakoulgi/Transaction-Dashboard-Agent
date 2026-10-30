@@ -544,6 +544,7 @@ Run with `make run-agent-service`, i.e. `uvicorn agent_service.main:create_app -
 | POST | `/api/plans/execute` | `ExecutePlanRequest{query_plan, page=1, page_size=25}` | `PlanPageResponse{result_entity, result_page}`, without calling Claude |
 | GET | `/api/transactions/{id}` | — | `TransactionDetail` (proxied through `TransactionServiceClient`; used by the detail drawer) |
 | GET | `/api/sessions/{id}/entries` | — | `list[SessionEntry]`: questions and query plans only |
+| GET | `/api/metrics/plan-cache` | — | `PlanCacheMetricsResponse`: plan cache hits (exact vs similar), misses by reason, what was learned, top templates (§7.5) |
 | DELETE | `/api/sessions/{id}` | — | 204 (a "new conversation" button) |
 | GET | `/health` | — | `{status: ok}` (no token) |
 
@@ -792,17 +793,22 @@ class StoredPlanTemplate(BaseModel):
 ### 7.5 Metrics (`GET /api/metrics/plan-cache`)
 ```json
 {
-  "since": "2026-10-28T20:00:00Z",
+  "enabled": true,
+  "store_available": true,
+  "since": "2026-10-29T14:00:00Z",
   "lookups": 120,
   "hits": {"exact": 40, "similar": 35},
-  "misses": {"below_threshold": 30, "follow_up": 10, "missing_slot": 2, "invalid_plan": 1, "unavailable": 2},
-  "learned": {"stored": 25, "skipped_similar": 3, "skipped_unsuccessful": 2},
+  "misses": {"no_templates": 1, "below_threshold": 29, "follow_up": 10, "missing_slot": 2, "invalid_plan": 1, "unavailable": 2},
+  "learned": {"stored": 25, "skipped_similar": 3, "skipped_unsuccessful": 10, "skipped_unslottable": 2},
   "hit_rate": 0.625,
   "exact_match_rate": 0.333,
-  "top_templates": [{"template_text": "chargebacks opened this month", "hit_count": 31}]
+  "top_templates": [{"template_text": "chargebacks opened this month", "hit_count": 31, "last_used_at": "2026-10-29T15:02:11Z"}]
 }
 ```
-`exact_match_rate` = exact hits ÷ lookups: the number that decides whether a Redis exact-key cache is worth adding.
+- `exact` = the nearest template has the very same normalized text (what a Redis exact-key cache would catch). `exact_match_rate` = exact hits ÷ lookups decides whether Phase 2b (Redis) is worth adding.
+- `enabled` = `PLAN_CACHE_ENABLED` **and** a Voyage key. The endpoint works while the cache is off (it shows the stored totals) and while Chroma is down (`store_available: false`, only this process's counts, no templates).
+- **Persistence** (`plan_cache_metrics.py`): one record in the Chroma collection `plan_cache_metrics`. Each outcome is added to the stored totals; while Chroma is unreachable, increments wait in memory and are added on the next successful write, so totals are never lost or overwritten with smaller numbers.
+- **One shared `ChromaConnection`** (`chroma_connection.py`) serves the template store and the metrics. It connects on first use (never at startup) and retries on the next call after a failure; every call runs under `CHROMA_TIMEOUT_SECONDS`.
 
 ## 8. UI (React + Vite + TS)
 
@@ -1008,7 +1014,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P2a-2 | `QueryTemplateExtractor` (Haiku, structured output, session-context aware) + template normalization | M | P1c-1 | Extraction tests: slots found; follow-up without context → `is_self_contained=False`. Slot values must appear in the question and match the template's placeholders, else the agent answers ✅ |
 | P2a-3 | `StoredPlanTemplate` + `SlotSubstitutor` (+ de-substitution of a recorded plan) | M | P1c-6 | Round trip: plan → template → substituted plan is identical. Refused when a slot isn't in the plan or a question value stays baked into the plan ✅ |
 | P2a-4 | Chroma in the default compose stack + `ChromaPlanStore` (nearest, add, record_hit) | M | P2a-1, P2a-3 | Chroma 1.5.9 in the stack (host port 8010; the agent doesn't wait for it). Nearest + similarity, upsert by template id, hit counts, every call under a timeout; unreachable Chroma → `PlanStoreUnavailableError` ✅ (the 0.90 phrasing check moves to the live run in P2a-6, as it needs real Voyage embeddings) |
-| P2a-5 | `PlanCacheMetrics` persisted in Chroma + `GET /api/metrics/plan-cache` | S | P2a-4 | Counters survive an agent restart; exact vs similar hits counted separately |
+| P2a-5 | `PlanCacheMetrics` persisted in Chroma + `GET /api/metrics/plan-cache` | S | P2a-4 | Counters survive an agent restart; exact vs similar hits counted separately; increments wait in memory while Chroma is down; endpoint works with the cache off or Chroma down ✅ |
 | P2a-6 | `PlanCache` wiring in `/chat`: extract → match → validate → execute; background learn on miss (store only below threshold); `plan_source` in `ChatResponse` + UI badge | L | P2a-2..5 | A repeated question shape makes no Opus call (stubbed client counters); a near-duplicate is not stored twice |
 
 ### Phase 2b — Redis cache (on hold: decide from `exact_match_rate`, see §7.5)
@@ -1016,7 +1022,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 |---|---|---|---|---|
 | P2b-1 | `RedisPlanCache` (get/put, configurable TTL, TTL refresh on hit, hit counter) | S | P0-2 | TTL honored; `0` means no expiry |
 | P2b-2 | `ChainedPlanResolver` [Redis → Chroma]; promote Chroma hits to Redis | S | P2a-5, P2b-1 | A Redis hit makes no Voyage or Chroma call |
-| P2b-3 | Observability: log which tier answered (`redis` / `vector` / `llm`) with latency | S | P2b-2 | Visible in logs. Counts exposed on `/health/details` |
+| P2b-3 | Observability: log which tier answered (`redis` / `vector` / `llm`) with latency | S | P2b-2 | Visible in logs. Counts added to `GET /api/metrics/plan-cache` |
 
 ### Phase 2c — Drill-down
 | ID | Task | Size | Depends | Acceptance |

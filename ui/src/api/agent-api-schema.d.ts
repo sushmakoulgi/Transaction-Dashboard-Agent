@@ -24,6 +24,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/metrics/plan-cache": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plan Cache Metrics
+         * @description Plan cache hits (exact vs similar), misses by reason and what was learned, since the
+         *     first recorded question. Available even while the cache is off or Chroma is down.
+         */
+        get: operations["plan_cache_metrics_api_metrics_plan_cache_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plans/execute": {
         parameters: {
             query?: never;
@@ -418,6 +439,59 @@ export interface components {
             /** Payment Status */
             payment_status: string;
         };
+        /** PlanCacheHits */
+        PlanCacheHits: {
+            /** Exact */
+            exact: number;
+            /** Similar */
+            similar: number;
+        };
+        /** PlanCacheLearned */
+        PlanCacheLearned: {
+            /** Skipped Similar */
+            skipped_similar: number;
+            /** Skipped Unslottable */
+            skipped_unslottable: number;
+            /** Skipped Unsuccessful */
+            skipped_unsuccessful: number;
+            /** Stored */
+            stored: number;
+        };
+        /** PlanCacheMetricsResponse */
+        PlanCacheMetricsResponse: {
+            /** Enabled */
+            enabled: boolean;
+            /** Exact Match Rate */
+            exact_match_rate: number;
+            /** Hit Rate */
+            hit_rate: number;
+            hits: components["schemas"]["PlanCacheHits"];
+            learned: components["schemas"]["PlanCacheLearned"];
+            /** Lookups */
+            lookups: number;
+            misses: components["schemas"]["PlanCacheMisses"];
+            /** Since */
+            since: string | null;
+            /** Store Available */
+            store_available: boolean;
+            /** Top Templates */
+            top_templates: components["schemas"]["TemplateUsage"][];
+        };
+        /** PlanCacheMisses */
+        PlanCacheMisses: {
+            /** Below Threshold */
+            below_threshold: number;
+            /** Follow Up */
+            follow_up: number;
+            /** Invalid Plan */
+            invalid_plan: number;
+            /** Missing Slot */
+            missing_slot: number;
+            /** No Templates */
+            no_templates: number;
+            /** Unavailable */
+            unavailable: number;
+        };
         /** PlanPageResponse */
         PlanPageResponse: {
             result_entity: components["schemas"]["SearchableEntity"];
@@ -520,6 +594,15 @@ export interface components {
             direction: "asc" | "desc";
             /** Field */
             field: string;
+        };
+        /** TemplateUsage */
+        TemplateUsage: {
+            /** Hit Count */
+            hit_count: number;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Template Text */
+            template_text: string;
         };
         /** TransactionDetail */
         TransactionDetail: {
@@ -658,6 +741,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    plan_cache_metrics_api_metrics_plan_cache_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanCacheMetricsResponse"];
                 };
             };
         };

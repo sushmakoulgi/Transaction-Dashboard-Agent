@@ -754,6 +754,160 @@
         "title": "PaymentDetail",
         "type": "object"
       },
+      "PlanCacheHits": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "title": "Exact",
+            "type": "integer"
+          },
+          "similar": {
+            "title": "Similar",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "exact",
+          "similar"
+        ],
+        "title": "PlanCacheHits",
+        "type": "object"
+      },
+      "PlanCacheLearned": {
+        "additionalProperties": false,
+        "properties": {
+          "skipped_similar": {
+            "title": "Skipped Similar",
+            "type": "integer"
+          },
+          "skipped_unslottable": {
+            "title": "Skipped Unslottable",
+            "type": "integer"
+          },
+          "skipped_unsuccessful": {
+            "title": "Skipped Unsuccessful",
+            "type": "integer"
+          },
+          "stored": {
+            "title": "Stored",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stored",
+          "skipped_similar",
+          "skipped_unsuccessful",
+          "skipped_unslottable"
+        ],
+        "title": "PlanCacheLearned",
+        "type": "object"
+      },
+      "PlanCacheMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exact_match_rate": {
+            "title": "Exact Match Rate",
+            "type": "number"
+          },
+          "hit_rate": {
+            "title": "Hit Rate",
+            "type": "number"
+          },
+          "hits": {
+            "$ref": "#/components/schemas/PlanCacheHits"
+          },
+          "learned": {
+            "$ref": "#/components/schemas/PlanCacheLearned"
+          },
+          "lookups": {
+            "title": "Lookups",
+            "type": "integer"
+          },
+          "misses": {
+            "$ref": "#/components/schemas/PlanCacheMisses"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "store_available": {
+            "title": "Store Available",
+            "type": "boolean"
+          },
+          "top_templates": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateUsage"
+            },
+            "title": "Top Templates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "store_available",
+          "since",
+          "lookups",
+          "hits",
+          "misses",
+          "learned",
+          "hit_rate",
+          "exact_match_rate",
+          "top_templates"
+        ],
+        "title": "PlanCacheMetricsResponse",
+        "type": "object"
+      },
+      "PlanCacheMisses": {
+        "additionalProperties": false,
+        "properties": {
+          "below_threshold": {
+            "title": "Below Threshold",
+            "type": "integer"
+          },
+          "follow_up": {
+            "title": "Follow Up",
+            "type": "integer"
+          },
+          "invalid_plan": {
+            "title": "Invalid Plan",
+            "type": "integer"
+          },
+          "missing_slot": {
+            "title": "Missing Slot",
+            "type": "integer"
+          },
+          "no_templates": {
+            "title": "No Templates",
+            "type": "integer"
+          },
+          "unavailable": {
+            "title": "Unavailable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "no_templates",
+          "below_threshold",
+          "follow_up",
+          "missing_slot",
+          "invalid_plan",
+          "unavailable"
+        ],
+        "title": "PlanCacheMisses",
+        "type": "object"
+      },
       "PlanPageResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1093,6 +1247,38 @@
         "title": "SortSpec",
         "type": "object"
       },
+      "TemplateUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "hit_count": {
+            "title": "Hit Count",
+            "type": "integer"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "template_text": {
+            "title": "Template Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_text",
+          "hit_count",
+          "last_used_at"
+        ],
+        "title": "TemplateUsage",
+        "type": "object"
+      },
       "TransactionDetail": {
         "additionalProperties": false,
         "properties": {
@@ -1368,6 +1554,30 @@
           }
         ],
         "summary": "Chat"
+      }
+    },
+    "/api/metrics/plan-cache": {
+      "get": {
+        "description": "Plan cache hits (exact vs similar), misses by reason and what was learned, since the\nfirst recorded question. Available even while the cache is off or Chroma is down.",
+        "operationId": "plan_cache_metrics_api_metrics_plan_cache_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanCacheMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Plan Cache Metrics"
       }
     },
     "/api/plans/execute": {

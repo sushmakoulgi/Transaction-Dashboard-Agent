@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import AnyHttpUrl
 
-from agent_service.plan_cache.chroma_plan_store import ChromaPlanStore, PlanStoreUnavailableError
+from agent_service.plan_cache.chroma_connection import ChromaConnection, PlanStoreUnavailableError
+from agent_service.plan_cache.chroma_plan_store import ChromaPlanStore
 from agent_service.plan_cache.slot_substitutor import StoredPlanTemplate, template_id_of
 from agent_service.settings import PlanCacheSettings
 
@@ -46,14 +47,15 @@ def stored_template(text: str, hit_count: int = 0) -> StoredPlanTemplate:
 @pytest.fixture
 async def store() -> AsyncIterator[ChromaPlanStore]:
     settings = PlanCacheSettings()
+    connection = ChromaConnection(settings.chroma_url, 5.0)
     collection_name = f"test_templates_{uuid.uuid4().hex[:12]}"
+    plan_store = ChromaPlanStore(connection, collection_name)
     try:
-        plan_store = await ChromaPlanStore.connect(settings.chroma_url, 5.0, collection_name)
         await plan_store.nearest(CHARGEBACKS_THIS_MONTH)  # creates the collection
     except PlanStoreUnavailableError as error:
         pytest.skip(f"Chroma is not reachable at {settings.chroma_url}: {error}")
     yield plan_store
-    await plan_store._client.delete_collection(collection_name)
+    await connection.delete_collection(collection_name)
 
 
 async def test_an_empty_store_has_no_nearest_template(store: ChromaPlanStore) -> None:
@@ -97,7 +99,22 @@ async def test_hits_are_counted_with_the_time_of_use(store: ChromaPlanStore) -> 
     assert match.template.last_used_at == NOW.replace(hour=15)
 
 
+async def test_most_used_templates_come_first(store: ChromaPlanStore) -> None:
+    await store.add(stored_template("refunds over {amount}", hit_count=2), UNRELATED)
+    await store.add(stored_template("chargebacks this month", hit_count=9), NEARLY_THE_SAME)
+    await store.add(stored_template("transactions today"), CHARGEBACKS_THIS_MONTH)
+
+    top = await store.top_templates(2)
+
+    assert [(t.template_text, t.hit_count) for t in top] == [
+        ("chargebacks this month", 9),
+        ("refunds over {amount}", 2),
+    ]
+
+
 async def test_an_unreachable_chroma_is_reported_not_raised_raw() -> None:
+    plan_store = ChromaPlanStore(ChromaConnection(AnyHttpUrl("http://127.0.0.1:9"), 1.0))
     with pytest.raises(PlanStoreUnavailableError):
-        plan_store = await ChromaPlanStore.connect(AnyHttpUrl("http://127.0.0.1:9"), 1.0)
         await plan_store.nearest(CHARGEBACKS_THIS_MONTH)
+    with pytest.raises(PlanStoreUnavailableError):  # retried on the next call, still down
+        await plan_store.add(stored_template("x"), CHARGEBACKS_THIS_MONTH)
