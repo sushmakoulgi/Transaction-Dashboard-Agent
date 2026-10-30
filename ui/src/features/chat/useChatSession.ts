@@ -47,7 +47,7 @@ export function useChatSession(api: AgentApiClient): ChatSession {
       setSessionId(answer.session_id)
       setLatestAnswer(answer)
       setAnswerSequence((sequence) => sequence + 1)
-      appendMessage({ role: 'assistant', text: answer.reply })
+      appendMessage({ role: 'assistant', text: answer.reply, fromSavedPlan: answer.plan_source === 'cache' })
     },
     onError: (error) => {
       appendMessage({

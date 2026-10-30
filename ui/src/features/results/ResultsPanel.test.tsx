@@ -67,6 +67,7 @@ function chatAnswer(page: PlanPageResponse | null, plan: QueryPlan | null = PLAN
     result_entity: page?.result_entity ?? null,
     result_page: page?.result_page ?? null,
     reached_round_limit: false,
+    plan_source: 'agent',
   }
 }
 

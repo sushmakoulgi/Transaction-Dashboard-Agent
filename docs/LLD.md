@@ -781,7 +781,7 @@ class StoredPlanTemplate(BaseModel):
 1. **Extract** with Haiku. Not self-contained → miss `follow_up`.
 2. **Embed** the normalized template (Voyage, `input_type="query"`) and ask Chroma for the nearest template.
 3. **Exact match** = the nearest template's text equals the normalized template text. Counted separately (this is what a Redis key would have caught).
-4. **Hit** if similarity ≥ `PLAN_HIT_THRESHOLD` (default 0.90) **and** every stored slot has a value. Substitute the slots, run `validate_filters` for each step, then run the plan with `PlanExecutor` (page 1). The reply is a fixed template, e.g. *"Found 6 chargebacks."* The question and plan are added to session memory so follow-ups work. `ChatResponse.plan_source = "cache"`.
+4. **Hit** if the template text is the same (exact) or similarity ≥ `PLAN_HIT_THRESHOLD` (default 0.90), **and** the question's slot names are exactly the stored template's (an extra value such as an amount would otherwise be silently dropped → miss `slot_mismatch`). Substitute the slots (the filled plan is validated as a `QueryPlan`), then run its search with `PlanExecutor` (page 1); a Transaction Service rejection is a miss `invalid_plan`. The reply is a fixed sentence, e.g. *"Found 6 chargebacks."* The question and plan are added to session memory so follow-ups work. `ChatResponse.plan_source = "cache"`.
 5. **Miss** (any failure above, or Chroma/Voyage/Haiku unavailable): the full Opus agent runs as today (`plan_source = "agent"`).
 6. **Learn** (background task, after a miss): store the agent's plan only if
    - the plan was recorded and succeeded,
@@ -798,7 +798,7 @@ class StoredPlanTemplate(BaseModel):
   "since": "2026-10-29T14:00:00Z",
   "lookups": 120,
   "hits": {"exact": 40, "similar": 35},
-  "misses": {"no_templates": 1, "below_threshold": 29, "follow_up": 10, "missing_slot": 2, "invalid_plan": 1, "unavailable": 2},
+  "misses": {"no_templates": 1, "below_threshold": 29, "follow_up": 10, "slot_mismatch": 2, "invalid_plan": 1, "unavailable": 2},
   "learned": {"stored": 25, "skipped_similar": 3, "skipped_unsuccessful": 10, "skipped_unslottable": 2},
   "hit_rate": 0.625,
   "exact_match_rate": 0.333,
@@ -1015,7 +1015,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P2a-3 | `StoredPlanTemplate` + `SlotSubstitutor` (+ de-substitution of a recorded plan) | M | P1c-6 | Round trip: plan → template → substituted plan is identical. Refused when a slot isn't in the plan or a question value stays baked into the plan ✅ |
 | P2a-4 | Chroma in the default compose stack + `ChromaPlanStore` (nearest, add, record_hit) | M | P2a-1, P2a-3 | Chroma 1.5.9 in the stack (host port 8010; the agent doesn't wait for it). Nearest + similarity, upsert by template id, hit counts, every call under a timeout; unreachable Chroma → `PlanStoreUnavailableError` ✅ (the 0.90 phrasing check moves to the live run in P2a-6, as it needs real Voyage embeddings) |
 | P2a-5 | `PlanCacheMetrics` persisted in Chroma + `GET /api/metrics/plan-cache` | S | P2a-4 | Counters survive an agent restart; exact vs similar hits counted separately; increments wait in memory while Chroma is down; endpoint works with the cache off or Chroma down ✅ |
-| P2a-6 | `PlanCache` wiring in `/chat`: extract → match → validate → execute; background learn on miss (store only below threshold); `plan_source` in `ChatResponse` + UI badge | L | P2a-2..5 | A repeated question shape makes no Opus call (stubbed client counters); a near-duplicate is not stored twice |
+| P2a-6 | `PlanCache` wiring in `/chat`: extract → match → validate → execute; background learn on miss (store only below threshold); `plan_source` in `ChatResponse` + UI badge | L | P2a-2..5 | A repeated question shape makes no Opus call (stubbed client counters); a near-duplicate is not stored twice; slot names must match exactly; only plans with a search are stored ✅ (live check with real Haiku/Voyage pending a VOYAGE_API_KEY) |
 
 ### Phase 2b — Redis cache (on hold: decide from `exact_match_rate`, see §7.5)
 | ID | Task | Size | Depends | Acceptance |

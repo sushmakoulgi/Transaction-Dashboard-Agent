@@ -16,6 +16,10 @@ export interface paths {
         /**
          * Chat
          * @description Answer a question. Omit session_id to start a new session; send it back to continue.
+         *
+         *     With the plan cache on, a question shaped like an earlier one reuses its stored plan
+         *     (no Opus call, `plan_source: "cache"`); otherwise Claude answers and the cache learns
+         *     from the answer after the response is sent.
          */
         post: operations["chat_api_chat_post"];
         delete?: never;
@@ -244,6 +248,12 @@ export interface components {
         };
         /** ChatResponse */
         ChatResponse: {
+            /**
+             * Plan Source
+             * @default agent
+             * @enum {string}
+             */
+            plan_source: "agent" | "cache";
             query_plan: components["schemas"]["QueryPlan-Output"] | null;
             /** Reached Round Limit */
             reached_round_limit: boolean;
@@ -485,10 +495,10 @@ export interface components {
             follow_up: number;
             /** Invalid Plan */
             invalid_plan: number;
-            /** Missing Slot */
-            missing_slot: number;
             /** No Templates */
             no_templates: number;
+            /** Slot Mismatch */
+            slot_mismatch: number;
             /** Unavailable */
             unavailable: number;
         };

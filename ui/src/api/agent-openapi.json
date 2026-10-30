@@ -204,6 +204,15 @@
       "ChatResponse": {
         "additionalProperties": false,
         "properties": {
+          "plan_source": {
+            "default": "agent",
+            "enum": [
+              "agent",
+              "cache"
+            ],
+            "title": "Plan Source",
+            "type": "string"
+          },
           "query_plan": {
             "anyOf": [
               {
@@ -884,12 +893,12 @@
             "title": "Invalid Plan",
             "type": "integer"
           },
-          "missing_slot": {
-            "title": "Missing Slot",
-            "type": "integer"
-          },
           "no_templates": {
             "title": "No Templates",
+            "type": "integer"
+          },
+          "slot_mismatch": {
+            "title": "Slot Mismatch",
             "type": "integer"
           },
           "unavailable": {
@@ -901,7 +910,7 @@
           "no_templates",
           "below_threshold",
           "follow_up",
-          "missing_slot",
+          "slot_mismatch",
           "invalid_plan",
           "unavailable"
         ],
@@ -1494,7 +1503,7 @@
   "paths": {
     "/api/chat": {
       "post": {
-        "description": "Answer a question. Omit session_id to start a new session; send it back to continue.",
+        "description": "Answer a question. Omit session_id to start a new session; send it back to continue.\n\nWith the plan cache on, a question shaped like an earlier one reuses its stored plan\n(no Opus call, `plan_source: \"cache\"`); otherwise Claude answers and the cache learns\nfrom the answer after the response is sent.",
         "operationId": "chat_api_chat_post",
         "requestBody": {
           "content": {

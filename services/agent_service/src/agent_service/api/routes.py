@@ -4,7 +4,7 @@ import contextlib
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Path, Response, status
 
 from agent_service.api.dependencies import AgentServiceContainer, get_container
 from agent_service.api.schemas import (
@@ -45,10 +45,32 @@ TOP_TEMPLATES_SHOWN = 10
 
 
 @router.post("/chat", response_model=ChatResponse, responses=ERRORS)
-async def chat(request: ChatRequest, container: Container) -> ChatResponse:
-    """Answer a question. Omit session_id to start a new session; send it back to continue."""
+async def chat(
+    request: ChatRequest, container: Container, background_tasks: BackgroundTasks
+) -> ChatResponse:
+    """Answer a question. Omit session_id to start a new session; send it back to continue.
+
+    With the plan cache on, a question shaped like an earlier one reuses its stored plan
+    (no Opus call, `plan_source: "cache"`); otherwise Claude answers and the cache learns
+    from the answer after the response is sent."""
     session_id = request.session_id or uuid.uuid4().hex
+    plan_cache = container.plan_cache
+    lookup = None
+    if plan_cache is not None:
+        cached, lookup = await plan_cache.try_answer(session_id, request.message)
+        if cached is not None:
+            return ChatResponse(
+                session_id=session_id,
+                reply=cached.reply,
+                query_plan=cached.query_plan,
+                result_entity=cached.page.entity,
+                result_page=cached.page.result,
+                reached_round_limit=False,
+                plan_source="cache",
+            )
     answer = await container.query_agent.answer(session_id, request.message)
+    if plan_cache is not None and lookup is not None:
+        background_tasks.add_task(plan_cache.learn, lookup, request.message, answer)
     result_page = (
         to_result_page(answer.result_entity, answer.result_page)
         if answer.result_entity is not None and answer.result_page is not None
@@ -111,7 +133,7 @@ async def plan_cache_metrics(container: Container) -> PlanCacheMetricsResponse:
                 )
                 for template in await container.plan_store.top_templates(TOP_TEMPLATES_SHOWN)
             ]
-    return to_metrics_response(snapshot, container.plan_cache_active, top_templates)
+    return to_metrics_response(snapshot, container.plan_cache is not None, top_templates)
 
 
 def to_metrics_response(
@@ -130,7 +152,7 @@ def to_metrics_response(
             no_templates=count(Outcome.MISS_NO_TEMPLATES),
             below_threshold=count(Outcome.MISS_BELOW_THRESHOLD),
             follow_up=count(Outcome.MISS_FOLLOW_UP),
-            missing_slot=count(Outcome.MISS_MISSING_SLOT),
+            slot_mismatch=count(Outcome.MISS_SLOT_MISMATCH),
             invalid_plan=count(Outcome.MISS_INVALID_PLAN),
             unavailable=count(Outcome.MISS_UNAVAILABLE),
         ),

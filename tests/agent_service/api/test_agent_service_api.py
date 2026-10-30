@@ -19,8 +19,12 @@ from agent_service.llm.claude_client import (
     ClaudeReply,
     ClaudeUnavailableError,
 )
-from agent_service.main import create_app
+from agent_service.main import PlanCacheParts, create_app
 from agent_service.mcp_bridge.mcp_tool_gateway import McpServerUnavailableError
+from agent_service.memory.session_store import SessionEntry
+from agent_service.plan_cache.chroma_plan_store import PlanMatch
+from agent_service.plan_cache.query_template_extractor import ExtractedQuery
+from agent_service.plan_cache.slot_substitutor import StoredPlanTemplate
 from agent_service.settings import AgentServiceSettings
 from mcp_server.main import create_mcp_server
 from mcp_server.settings import McpServerSettings
@@ -54,7 +58,9 @@ def agent_settings(auth_enabled: bool = True, **overrides: Any) -> AgentServiceS
 
 @asynccontextmanager
 async def agent_api(
-    claude_replies: Sequence[ClaudeReply | Exception], auth_enabled: bool = True
+    claude_replies: Sequence[ClaudeReply | Exception],
+    auth_enabled: bool = True,
+    plan_cache_parts: PlanCacheParts | None = None,
 ) -> AsyncIterator[tuple[httpx.AsyncClient, ScriptedClaude]]:
     service_app = create_transaction_service_app(
         TransactionServiceSettings(
@@ -79,6 +85,7 @@ async def agent_api(
         claude=claude,
         mcp_client_factory=lambda: Client(mcp_server),
         transaction_service_transport=service_transport,
+        plan_cache_parts=plan_cache_parts,
     )
     try:
         async with (
@@ -134,6 +141,65 @@ async def test_plan_cache_metrics_are_served_even_without_chroma() -> None:
     assert body["lookups"] == 0 and body["exact_match_rate"] == 0.0
     assert body["hits"] == {"exact": 0, "similar": 0}
     assert body["top_templates"] == []
+
+
+class OneTemplateExtractor:
+    async def extract(
+        self, question: str, previous_entries: Sequence[SessionEntry]
+    ) -> ExtractedQuery:
+        return ExtractedQuery(
+            template_text="transactions with chargebacks", slot_values={}, is_self_contained=True
+        )
+
+
+class ConstantEmbeddings:
+    async def embed(self, text: str) -> list[float]:
+        return [1.0, 0.0]
+
+
+class InMemoryPlanStore:
+    def __init__(self) -> None:
+        self.templates: list[StoredPlanTemplate] = []
+
+    async def nearest(self, embedding: list[float]) -> PlanMatch | None:
+        return PlanMatch(self.templates[-1], 1.0) if self.templates else None
+
+    async def add(self, template: StoredPlanTemplate, embedding: list[float]) -> None:
+        self.templates.append(template)
+
+    async def record_hit(self, template_id: str, now: Any) -> None:
+        pass
+
+
+async def test_a_repeated_question_is_answered_from_the_plan_cache_without_claude() -> None:
+    store = InMemoryPlanStore()
+    parts = PlanCacheParts(OneTemplateExtractor(), ConstantEmbeddings(), store)
+    async with agent_api(searches_then_answers(), plan_cache_parts=parts) as (client, claude):
+        first = (await chat(client, "Which transactions have chargebacks?")).json()
+        # The plan was learned in the background, after the first response.
+        assert [template.template_text for template in store.templates] == [
+            "transactions with chargebacks"
+        ]
+        second = (
+            await chat(
+                client, "Which transactions have chargebacks?", session_id=first["session_id"]
+            )
+        ).json()
+        metrics = (await client.get("/api/metrics/plan-cache", headers=AUTHORIZED)).json()
+        entries = (
+            await client.get(f"/api/sessions/{first['session_id']}/entries", headers=AUTHORIZED)
+        ).json()
+
+    assert first["plan_source"] == "agent"
+    assert second["plan_source"] == "cache"
+    assert len(claude.requests) == 2  # both from the first question: none for the second
+    assert second["reply"] == "Found 15 transactions."
+    assert second["query_plan"] == first["query_plan"]
+    assert second["result_page"]["total_count"] == 15
+    assert len(entries) == 2  # the cached answer is in the session like any other
+    assert metrics["enabled"] is True
+    assert (metrics["lookups"], metrics["hits"]["exact"]) == (2, 1)
+    assert metrics["misses"]["no_templates"] == 1 and metrics["learned"]["stored"] == 1
 
 
 async def test_cors_allows_the_ui_origin_only() -> None:

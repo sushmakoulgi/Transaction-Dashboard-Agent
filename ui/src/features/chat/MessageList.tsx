@@ -39,6 +39,11 @@ export function MessageList({ messages, isWaitingForAnswer, onPickExample }: Mes
       {messages.map((message) => (
         <div key={message.id} className={`message message--${message.role}`} data-role={message.role}>
           {message.role === 'assistant' ? <ReplyMarkdown text={message.text} /> : <p>{message.text}</p>}
+          {message.fromSavedPlan && (
+            <span className="saved-plan-badge" title="Answered by reusing the plan of an earlier, similar question, without asking Claude">
+              ⚡ Saved plan
+            </span>
+          )}
           {message.issues && (
             <ul className="message-issues">
               {message.issues.map((issue) => (

@@ -1,6 +1,7 @@
 """Request and response bodies of the agent service API (what the React UI uses)."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import Field
 
@@ -30,6 +31,7 @@ class ChatResponse(ContractModel):
     result_entity: SearchableEntity | None
     result_page: ResultPage | None
     reached_round_limit: bool
+    plan_source: Literal["agent", "cache"] = "agent"  # "cache": a stored plan, no Opus call
 
 
 class ExecutePlanRequest(ContractModel):
@@ -52,7 +54,7 @@ class PlanCacheMisses(ContractModel):
     no_templates: int
     below_threshold: int
     follow_up: int
-    missing_slot: int
+    slot_mismatch: int  # the question's slots differ from the stored template's
     invalid_plan: int
     unavailable: int  # Voyage, Haiku or Chroma could not be used
 

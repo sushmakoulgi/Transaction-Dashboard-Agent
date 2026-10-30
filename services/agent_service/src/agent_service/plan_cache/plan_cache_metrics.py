@@ -35,7 +35,7 @@ class PlanCacheOutcome(StrEnum):
     MISS_NO_TEMPLATES = "miss_no_templates"
     MISS_BELOW_THRESHOLD = "miss_below_threshold"
     MISS_FOLLOW_UP = "miss_follow_up"
-    MISS_MISSING_SLOT = "miss_missing_slot"
+    MISS_SLOT_MISMATCH = "miss_slot_mismatch"
     MISS_INVALID_PLAN = "miss_invalid_plan"
     MISS_UNAVAILABLE = "miss_unavailable"
     # Learning: after the agent answered a miss

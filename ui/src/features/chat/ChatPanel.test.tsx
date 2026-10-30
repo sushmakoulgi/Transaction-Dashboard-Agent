@@ -17,6 +17,7 @@ function answer(reply: string, overrides: Partial<ChatResponse> = {}): ChatRespo
     result_entity: null,
     result_page: null,
     reached_round_limit: false,
+    plan_source: 'agent',
     ...overrides,
   }
 }
@@ -104,6 +105,23 @@ describe('chat panel', () => {
     expect(within(bubble).getByRole('cell', { name: '10080831' })).toBeTruthy()
     expect(bubble.querySelector('img')).toBeNull()
     expect(bubble.textContent).not.toContain('**')
+  })
+
+  it('marks answers that reused a saved plan, and only those', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(answer('Customer 10001641 has 2 chargebacks.'))
+      .mockResolvedValueOnce(answer('Found 2 chargebacks.', { plan_source: 'cache' }))
+    renderApp(fakeApi({ chat }))
+
+    await userEvent.type(questionBox(), 'chargebacks for 10001641{Enter}')
+    await screen.findAllByText('Customer 10001641 has 2 chargebacks.')
+    await userEvent.type(questionBox(), 'chargebacks for 10033317{Enter}')
+    await screen.findAllByText('Found 2 chargebacks.')
+
+    const badges = screen.getAllByText('⚡ Saved plan')
+    expect(badges).toHaveLength(1)
+    expect(badges[0].closest('.message')?.textContent).toContain('Found 2 chargebacks.')
   })
 
   it('sends on Enter, keeps Shift+Enter for new lines, and continues the session', async () => {

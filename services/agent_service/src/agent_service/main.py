@@ -9,9 +9,11 @@ import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
+import anthropic
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +29,10 @@ from agent_service.mcp_bridge.mcp_tool_gateway import McpServerUnavailableError,
 from agent_service.memory.session_store import InMemorySessionStore
 from agent_service.plan_cache.chroma_connection import ChromaConnection
 from agent_service.plan_cache.chroma_plan_store import ChromaPlanStore
+from agent_service.plan_cache.embedding_provider import EmbeddingProvider, VoyageEmbeddingProvider
+from agent_service.plan_cache.plan_cache import PlanCache, PlanTemplateStore, TemplateExtractor
 from agent_service.plan_cache.plan_cache_metrics import PlanCacheMetrics
+from agent_service.plan_cache.query_template_extractor import QueryTemplateExtractor
 from agent_service.plan_execution.plan_executor import PlanExecutor
 from agent_service.settings import AgentServiceSettings
 from shared.clients.transaction_service_client import TransactionServiceClient
@@ -56,15 +61,61 @@ async def connect_waiting_for_mcp_server(
             await asyncio.sleep(MCP_CONNECT_RETRY_INTERVAL_SECONDS)
 
 
+@dataclass(frozen=True)
+class PlanCacheParts:
+    """The plan cache's outside services; tests pass fakes (which turns the cache on)."""
+
+    extractor: TemplateExtractor
+    embeddings: EmbeddingProvider
+    store: PlanTemplateStore
+
+
+async def production_plan_cache_parts(
+    settings: AgentServiceSettings, chroma: ChromaConnection, resources: AsyncExitStack
+) -> PlanCacheParts | None:
+    """Haiku, Voyage and Chroma, or None while the plan cache is off (or has no Voyage key)."""
+    if not settings.plan_cache_active or settings.voyage_api_key is None:
+        return None
+    haiku = anthropic.AsyncAnthropic(
+        api_key=(
+            settings.anthropic_api_key.get_secret_value()
+            if settings.anthropic_api_key is not None
+            else None
+        ),
+        timeout=settings.claude_request_timeout_seconds,
+        max_retries=settings.claude_max_retries,
+    )
+    resources.push_async_callback(haiku.close)
+    voyage = VoyageEmbeddingProvider(
+        settings.voyage_api_key,
+        settings.embedding_model,
+        base_url=str(settings.voyage_api_url),
+        timeout_seconds=settings.embedding_timeout_seconds,
+        max_retries=settings.embedding_max_retries,
+    )
+    resources.push_async_callback(voyage.aclose)
+    return PlanCacheParts(
+        extractor=QueryTemplateExtractor(
+            haiku,
+            settings.template_extractor_model,
+            settings.template_extractor_effort,
+            settings.template_extractor_max_tokens,
+        ),
+        embeddings=voyage,
+        store=ChromaPlanStore(chroma),
+    )
+
+
 def create_app(
     settings: AgentServiceSettings | None = None,
     clock: Clock | None = None,
     claude: ClaudeMessenger | None = None,
     mcp_client_factory: Callable[[], Client] | None = None,
     transaction_service_transport: httpx.AsyncBaseTransport | None = None,
+    plan_cache_parts: PlanCacheParts | None = None,
 ) -> FastAPI:
-    """The optional arguments let tests swap in a scripted Claude, an in-memory MCP server
-    and an in-process Transaction Service; production leaves them unset."""
+    """The optional arguments let tests swap in a scripted Claude, an in-memory MCP server,
+    an in-process Transaction Service and plan cache fakes; production leaves them unset."""
     service_settings = settings or AgentServiceSettings()  # values from the environment
     service_clock = clock or SystemClock()
 
@@ -107,6 +158,26 @@ def create_app(
             chroma = ChromaConnection(
                 service_settings.chroma_url, service_settings.chroma_timeout_seconds
             )
+            plan_store = ChromaPlanStore(chroma)
+            plan_cache_metrics = PlanCacheMetrics(chroma, service_clock)
+            plan_executor = PlanExecutor(transaction_service)
+            parts = plan_cache_parts or await production_plan_cache_parts(
+                service_settings, chroma, resources
+            )
+            plan_cache = (
+                PlanCache(
+                    parts.extractor,
+                    parts.embeddings,
+                    parts.store,
+                    plan_cache_metrics,
+                    sessions,
+                    plan_executor,
+                    service_clock,
+                    service_settings.plan_hit_threshold,
+                )
+                if parts is not None
+                else None
+            )
             app.state.container = AgentServiceContainer(
                 query_agent=QueryAgent(
                     claude_messenger,
@@ -117,12 +188,12 @@ def create_app(
                     service_settings.max_tool_rounds,
                     service_settings.tool_result_preview_rows,
                 ),
-                plan_executor=PlanExecutor(transaction_service),
+                plan_executor=plan_executor,
                 sessions=sessions,
                 transaction_service=transaction_service,
-                plan_store=ChromaPlanStore(chroma),
-                plan_cache_metrics=PlanCacheMetrics(chroma, service_clock),
-                plan_cache_active=service_settings.plan_cache_active,
+                plan_store=plan_store,
+                plan_cache_metrics=plan_cache_metrics,
+                plan_cache=plan_cache,
             )
             yield
 
