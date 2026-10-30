@@ -86,6 +86,7 @@ services:
     environment:
       MCP_SERVER_URL: http://mcp-server:8100/mcp
       TRANSACTION_SERVICE_URL: http://transaction-service:8200
+      CHROMA_URL: http://chroma:8000
       CORS_ALLOWED_ORIGINS: '["http://localhost:${UI_HOST_PORT:-5173}"]'
     ports:
       - "${AGENT_SERVICE_HOST_PORT:-8000}:8000"
@@ -115,7 +116,25 @@ services:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]  # IPv4: nginx listens on 0.0.0.0
       <<: *healthcheck-timing
 
-  # Phase 2 services: started only with `--profile phase2`.
+  # Plan cache store (Phase 2a). The agent doesn't wait for it: while Chroma is down, every
+  # question goes to Claude.
+  chroma:
+    image: chromadb/chroma:${CHROMA_IMAGE_TAG:-1.5.9}
+    restart: unless-stopped
+    ports:
+      - "${CHROMA_HOST_PORT:-8010}:8000"
+    volumes:
+      - chroma-data:/data
+    healthcheck:
+      # The image has bash but no curl/wget: ask the heartbeat endpoint over /dev/tcp.
+      test:
+        - CMD
+        - bash
+        - -c
+        - "exec 3<>/dev/tcp/127.0.0.1/8000 && printf 'GET /api/v2/heartbeat HTTP/1.0\r\n\r\n' >&3 && grep -q nanosecond <&3"
+      <<: *healthcheck-timing
+
+  # On hold (Phase 2b, decided from the plan cache's exact_match_rate): `--profile phase2`.
   redis:
     image: redis:7.4-alpine
     profiles: ["phase2"]
@@ -127,13 +146,6 @@ services:
       timeout: 3s
       retries: 10
 
-  chroma:
-    image: chromadb/chroma:${CHROMA_IMAGE_TAG:-0.6.3}
-    profiles: ["phase2"]
-    ports:
-      - "${CHROMA_HOST_PORT:-8001}:8000"
-    volumes:
-      - chroma-data:/chroma/chroma
 
 volumes:
   postgres-data:

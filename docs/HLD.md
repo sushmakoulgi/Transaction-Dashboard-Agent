@@ -61,7 +61,7 @@ flowchart LR
     subgraph Data
         PG[(Postgres :5432<br/>read-only role)]
         RD[(Redis :6379<br/>Phase 2)]
-        CH[(ChromaDB :8001<br/>Phase 2)]
+        CH[(ChromaDB :8010<br/>plan cache)]
     end
 
     CL[[Claude API]]

@@ -871,6 +871,8 @@ ui/
 | `mcp-server` | same | 8100 | transaction-service healthy |
 | `agent-service` | same | 8000 | mcp-server healthy |
 | `ui` | `transaction-dashboard-ui:local` (nginx) | 5173 → 80 | agent-service healthy |
+| `chroma` | `chromadb/chroma:1.5.9` | 8010 → 8000 (`CHROMA_HOST_PORT`; 8001 is often taken by RedisInsight) | — (the agent doesn't wait for it: without Chroma every question goes to Claude) |
+| `redis` | `redis:7.4-alpine` | 6379 | on hold, only with `--profile phase2` |
 
 - **One Python image** (`services.Dockerfile`): `python:3.12-slim` with uv 0.13.5. `uv sync --frozen --no-dev` installs from the lockfile, with dependencies in their own layer before the sources. It runs as a non-root user (uid 10001). Each container picks its command; the services bind `0.0.0.0`.
 - **`db-setup`** runs `python -m transaction_database.setup`: Alembic `upgrade head` (always), then the sample data **only if `transactions` is empty**, so restarts never replace data (`make seed` still does, on purpose). It was verified on a fresh volume (seeded 100) and again on the second run (skipped).
@@ -904,7 +906,8 @@ SESSION_CONTEXT_QUESTION_LIMIT=10
 # Phase 2
 VOYAGE_API_KEY=***
 EMBEDDING_MODEL=voyage-4-lite
-CHROMA_URL=http://chroma:8000
+CHROMA_URL=http://chroma:8000   # from the host: http://localhost:8010
+CHROMA_TIMEOUT_SECONDS=5
 PLAN_CACHE_ENABLED=true
 PLAN_HIT_THRESHOLD=0.90
 TEMPLATE_EXTRACTOR_MODEL=claude-haiku-5-5
@@ -1004,7 +1007,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P2a-1 | `EmbeddingProvider` Protocol + `VoyageEmbeddingProvider`; settings (`VOYAGE_API_KEY`, model, `PLAN_CACHE_ENABLED`, `PLAN_HIT_THRESHOLD`) | S | P0-3 | One input type for both sides. Retries on 429/5xx/network, not on 4xx. Off by default; enabled without a key still starts (warning logged, every question goes to Claude) ✅ |
 | P2a-2 | `QueryTemplateExtractor` (Haiku, structured output, session-context aware) + template normalization | M | P1c-1 | Extraction tests: slots found; follow-up without context → `is_self_contained=False`. Slot values must appear in the question and match the template's placeholders, else the agent answers ✅ |
 | P2a-3 | `StoredPlanTemplate` + `SlotSubstitutor` (+ de-substitution of a recorded plan) | M | P1c-6 | Round trip: plan → template → substituted plan is identical. Refused when a slot isn't in the plan or a question value stays baked into the plan ✅ |
-| P2a-4 | Chroma in the default compose stack + `ChromaPlanStore` (nearest, add, record_hit) | M | P2a-1, P2a-3 | Similar phrasings hit; different intents miss at 0.90 |
+| P2a-4 | Chroma in the default compose stack + `ChromaPlanStore` (nearest, add, record_hit) | M | P2a-1, P2a-3 | Chroma 1.5.9 in the stack (host port 8010; the agent doesn't wait for it). Nearest + similarity, upsert by template id, hit counts, every call under a timeout; unreachable Chroma → `PlanStoreUnavailableError` ✅ (the 0.90 phrasing check moves to the live run in P2a-6, as it needs real Voyage embeddings) |
 | P2a-5 | `PlanCacheMetrics` persisted in Chroma + `GET /api/metrics/plan-cache` | S | P2a-4 | Counters survive an agent restart; exact vs similar hits counted separately |
 | P2a-6 | `PlanCache` wiring in `/chat`: extract → match → validate → execute; background learn on miss (store only below threshold); `plan_source` in `ChatResponse` + UI badge | L | P2a-2..5 | A repeated question shape makes no Opus call (stubbed client counters); a near-duplicate is not stored twice |
 

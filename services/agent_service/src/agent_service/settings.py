@@ -64,6 +64,8 @@ class PlanCacheSettings(BaseServiceSettings):
     plan_cache_enabled: bool = False
     plan_hit_threshold: float = Field(default=0.90, gt=0, le=1)  # cosine similarity
     voyage_api_key: SecretStr | None = None
+    chroma_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8010")  # the stack's published port
+    chroma_timeout_seconds: float = Field(default=5.0, gt=0)
     voyage_api_url: AnyHttpUrl = AnyHttpUrl("https://api.voyageai.com/v1")
     embedding_model: str = "voyage-4-lite"
     embedding_timeout_seconds: float = Field(default=10.0, gt=0)
