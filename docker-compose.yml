@@ -71,8 +71,10 @@ services:
       TRANSACTION_SERVICE_URL: http://transaction-service:8200
       # Let other containers reach it by name; DNS-rebinding protection stays on.
       MCP_ALLOWED_HOSTS: '["127.0.0.1:*", "localhost:*", "[::1]:*", "mcp-server:*"]'
-    ports:
-      - "${MCP_SERVER_HOST_PORT:-8100}:8100"
+    # Internal only: no host port. Only the agent reaches it, over the compose network; outside
+    # MCP clients (Claude Desktop, Inspector, scripts on the host) can't connect (HLD §11.9).
+    expose:
+      - "8100"
     depends_on:
       transaction-service:
         condition: service_healthy

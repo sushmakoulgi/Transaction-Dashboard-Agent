@@ -256,7 +256,7 @@ erDiagram
 |---|---|---|
 | **0 Foundation** | Repo skeleton, docker-compose, config, migrations, seed | `make up && make seed` gives 100 transactions with related rows |
 | **1a Transaction Service** | Filter engine + search/detail/metadata endpoints | All 5 use cases pass as API tests. Injection test suite passes |
-| **1b MCP Server** | Tools over Streamable HTTP with auth | Tools work from MCP Inspector / Claude Desktop |
+| **1b MCP Server** | Tools over Streamable HTTP with auth, internal only | The agent lists and calls every tool. No host port in docker-compose; outside MCP clients are not supported (§11.9) |
 | **1c Agent Service** | Claude loop, session memory, `/chat`, `/plans/execute` | Natural-language test set routes to the right tool and filters, including follow-up questions |
 | **1d UI** | Chat + paginated table | End-to-end demo of all 5 use cases |
 | **2a Plan RAG** | Template extraction, Voyage + Chroma store and lookup, slot substitution | A repeated query shape runs with no planner call |

@@ -6,7 +6,7 @@ from shared.config.settings import AuthenticatedServiceSettings, api_token_field
 
 
 class McpServerSettings(AuthenticatedServiceSettings):
-    mcp_api_token: SecretStr | None = api_token_field()  # what MCP clients must send
+    mcp_api_token: SecretStr | None = api_token_field()  # what the agent (its only client) sends
     transaction_service_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8200")
     transaction_service_api_token: SecretStr | None = api_token_field()
     transaction_service_timeout_seconds: float = Field(default=10.0, gt=0)

@@ -1,8 +1,10 @@
 """MCP server exposing the Transaction Service as tools over Streamable HTTP.
 
 Run with: uvicorn mcp_server.main:create_app --factory --port 8100
-Clients connect to http://localhost:8100/mcp with `Authorization: Bearer $MCP_API_TOKEN`
-(not needed when AUTH_ENABLED is false).
+Internal only: the agent is its one client (http://localhost:8100/mcp locally,
+http://mcp-server:8100/mcp in docker-compose, which publishes no host port) and sends
+`Authorization: Bearer $MCP_API_TOKEN` (not needed when AUTH_ENABLED is false). Outside MCP
+clients such as Claude Desktop are not supported.
 
 The server is stateless and answers in JSON: every tool call is a self-contained
 request/response, so no session state is kept between calls.

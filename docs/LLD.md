@@ -878,7 +878,7 @@ ui/
 | `postgres` | `postgres:16.4-alpine` | 5432 | — |
 | `db-setup` (one-shot) | `transaction-dashboard-services:local` | — | postgres healthy |
 | `transaction-service` | same | 8200 | db-setup completed |
-| `mcp-server` | same | 8100 | transaction-service healthy |
+| `mcp-server` | same | none: `expose: 8100` on the compose network only (internal, HLD §11.9) | transaction-service healthy |
 | `agent-service` | same | 8000 | mcp-server healthy |
 | `ui` | `transaction-dashboard-ui:local` (nginx) | 5173 → 80 | agent-service healthy |
 | `chroma` | `chromadb/chroma:1.5.9` | 8010 → 8000 (`CHROMA_HOST_PORT`; 8001 is often taken by RedisInsight) | — (the agent doesn't wait for it: without Chroma every question goes to Claude) |
@@ -886,7 +886,7 @@ ui/
 
 - **One Python image** (`services.Dockerfile`): `python:3.12-slim` with uv 0.13.5. `uv sync --frozen --no-dev` installs from the lockfile, with dependencies in their own layer before the sources. It runs as a non-root user (uid 10001). Each container picks its command; the services bind `0.0.0.0`.
 - **`db-setup`** runs `python -m transaction_database.setup`: Alembic `upgrade head` (always), then the sample data **only if `transactions` is empty**, so restarts never replace data (`make seed` still does, on purpose). It was verified on a fresh volume (seeded 100) and again on the second run (skipped).
-- **Configuration:** containers read `.env` (`env_file`), and compose overrides the localhost addresses with in-network names: the DSNs use `@postgres:5432`, `TRANSACTION_SERVICE_URL=http://transaction-service:8200`, `MCP_SERVER_URL=http://mcp-server:8100/mcp`. Host ports are configurable with `*_HOST_PORT`.
+- **Configuration:** containers read `.env` (`env_file`), and compose overrides the localhost addresses with in-network names: the DSNs use `@postgres:5432`, `TRANSACTION_SERVICE_URL=http://transaction-service:8200`, `MCP_SERVER_URL=http://mcp-server:8100/mcp`. Host ports are configurable with `*_HOST_PORT`; the MCP server has none, so nothing outside the compose network can reach it.
 - **MCP DNS-rebinding protection is always explicit.** The SDK enables it by itself only when bound to localhost, and a container binds `0.0.0.0`. `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` default to the localhost names; compose adds `mcp-server:*` so the agent can connect. A test checks that `mcp-server:8100` is accepted and `evil.example` is still rejected.
 - **UI image:** a `node:24-alpine` build stage, then `nginx:1.27-alpine` serving `dist/` (hashed assets cached as immutable, `index.html` revalidated, `/healthz`).
   - `VITE_AGENT_API_URL` and `VITE_AGENT_API_TOKEN` (from `AGENT_API_TOKEN`) are **build arguments**, because Vite compiles them into the bundle.
@@ -990,7 +990,7 @@ Size estimates: **S** ≤ ½ day, **M** ≈ 1 day, **L** ≈ 2 days. Each task's
 | P1b-1 | `TransactionServiceClient` (httpx, timeouts, retries, token) | S | P1a-10 | Unit tested with httpx's mock transport, plus against the real service in-process (now in `shared/clients`) ✅ |
 | P1b-2 | FastMCP app, Streamable HTTP transport, bearer-token middleware | S | P0-3 | Unauthenticated requests rejected ✅ |
 | P1b-3 | 5 tools with detailed descriptions; schemas from shared contracts; 422 → tool error with issues | M | P1b-1, P1b-2 | MCP Inspector lists the tools and runs each successfully ✅ |
-| P1b-4 | Contract tests + doc for connecting Claude Desktop / other clients | S | P1b-3 | README section verified with a real client |
+| P1b-4 | MCP contract tests (the doc for connecting Claude Desktop / other clients was dropped 2026-10-29: the server is internal only) | S | P1b-3 | Tool schemas and error shapes pinned by tests |
 
 ### Phase 1c — Agent Service
 | ID | Task | Size | Depends | Acceptance |

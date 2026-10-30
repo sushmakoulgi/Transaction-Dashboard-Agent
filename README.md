@@ -21,7 +21,7 @@ existing data (`make seed` replaces it on purpose). `make logs` follows the logs
 |---|---|---|
 | ui | http://localhost:5173 | React UI (chat + results) |
 | agent-service | http://localhost:8000/docs | Claude agent API used by the UI |
-| mcp-server | http://localhost:8100/mcp | MCP tools, used only by the agent (internal; `MCP_TRANSPORT=in_process` runs them inside the agent instead) |
+| mcp-server | — (no host port) | MCP tools, used only by the agent over the compose network; not reachable from the host or by outside MCP clients such as Claude Desktop (`MCP_TRANSPORT=in_process` runs them inside the agent instead) |
 | transaction-service | http://localhost:8200/docs | Read-only search API over Postgres |
 | postgres | localhost:5432 | Database (read-only role for the services) |
 
