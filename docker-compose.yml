@@ -64,36 +64,18 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8200/health')"]
       <<: *healthcheck-timing
 
-  mcp-server:
-    <<: *python-service
-    command: ["uvicorn", "mcp_server.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8100"]
-    environment:
-      TRANSACTION_SERVICE_URL: http://transaction-service:8200
-      # Let other containers reach it by name; DNS-rebinding protection stays on.
-      MCP_ALLOWED_HOSTS: '["127.0.0.1:*", "localhost:*", "[::1]:*", "mcp-server:*"]'
-    # Internal only: no host port. Only the agent reaches it, over the compose network; outside
-    # MCP clients (Claude Desktop, Inspector, scripts on the host) can't connect (HLD §11.9).
-    expose:
-      - "8100"
-    depends_on:
-      transaction-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
-      <<: *healthcheck-timing
-
   agent-service:
     <<: *python-service
     command: ["uvicorn", "agent_service.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
     environment:
-      MCP_SERVER_URL: http://mcp-server:8100/mcp
       TRANSACTION_SERVICE_URL: http://transaction-service:8200
       CHROMA_URL: http://chroma:8000
       CORS_ALLOWED_ORIGINS: '["http://localhost:${UI_HOST_PORT:-5173}"]'
     ports:
       - "${AGENT_SERVICE_HOST_PORT:-8000}:8000"
+    # The MCP tools run inside the agent (in memory): no MCP container, port or endpoint.
     depends_on:
-      mcp-server:
+      transaction-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

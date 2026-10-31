@@ -1,5 +1,5 @@
-"""The agent service HTTP API with a scripted Claude, an in-memory MCP server and the real
-Transaction Service in-process (seeded Postgres)."""
+"""The agent service HTTP API with a scripted Claude, its own in-process MCP server and the
+real Transaction Service in-process (seeded Postgres)."""
 
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -9,9 +9,7 @@ import httpx
 import pytest
 from agent_test_helpers import ScriptedClaude, final_answer, reply_with, tool_use
 from filter_test_helpers import condition
-from mcp import Client
-from mcp.client.streamable_http import streamable_http_client
-from pydantic import SecretStr, ValidationError
+from pydantic import SecretStr
 from sqlalchemy.exc import OperationalError
 
 from agent_service.llm.claude_client import (
@@ -20,14 +18,11 @@ from agent_service.llm.claude_client import (
     ClaudeUnavailableError,
 )
 from agent_service.main import PlanCacheParts, create_app
-from agent_service.mcp_bridge.mcp_tool_gateway import McpServerUnavailableError
 from agent_service.memory.session_store import SessionEntry
 from agent_service.plan_cache.chroma_plan_store import PlanMatch
 from agent_service.plan_cache.query_template_extractor import ExtractedQuery
 from agent_service.plan_cache.slot_substitutor import StoredPlanTemplate
 from agent_service.settings import AgentServiceSettings
-from mcp_server.main import create_mcp_server
-from mcp_server.settings import McpServerSettings
 from shared.config import DatabaseSettings
 from transaction_service.main import create_app as create_transaction_service_app
 from transaction_service.settings import TransactionServiceSettings
@@ -45,7 +40,6 @@ def agent_settings(auth_enabled: bool = True, **overrides: Any) -> AgentServiceS
     values: dict[str, Any] = {
         "auth_enabled": auth_enabled,
         "agent_api_token": SecretStr(AGENT_TOKEN) if auth_enabled else None,
-        "mcp_api_token": SecretStr("mcp-token-0123456789abcdef") if auth_enabled else None,
         "transaction_service_url": "http://transaction-service",
         "transaction_service_api_token": SERVICE_TOKEN,
         "anthropic_api_key": None,
@@ -60,11 +54,8 @@ def agent_settings(auth_enabled: bool = True, **overrides: Any) -> AgentServiceS
 async def agent_api(
     claude_replies: Sequence[ClaudeReply | Exception],
     auth_enabled: bool = True,
-    mcp_in_process: bool = False,
     plan_cache_parts: PlanCacheParts | None = None,
 ) -> AsyncIterator[tuple[httpx.AsyncClient, ScriptedClaude]]:
-    """`mcp_in_process` lets the app build its own MCP server (MCP_TRANSPORT=in_process)
-    instead of being handed the test one."""
     service_app = create_transaction_service_app(
         TransactionServiceSettings(
             postgres_dsn_readonly=DatabaseSettings().postgres_dsn_readonly,
@@ -73,20 +64,10 @@ async def agent_api(
         )
     )
     service_transport = httpx.ASGITransport(app=service_app)
-    mcp_server = create_mcp_server(
-        McpServerSettings(
-            auth_enabled=False,
-            mcp_api_token=None,
-            transaction_service_url="http://transaction-service",  # type: ignore[arg-type]
-            transaction_service_api_token=SERVICE_TOKEN,
-        ),
-        transaction_service_transport=service_transport,
-    )
     claude = ScriptedClaude(claude_replies)
     app = create_app(
-        agent_settings(auth_enabled, mcp_transport="in_process" if mcp_in_process else "http"),
+        agent_settings(auth_enabled),
         claude=claude,
-        mcp_client_factory=None if mcp_in_process else lambda: Client(mcp_server),
         transaction_service_transport=service_transport,
         plan_cache_parts=plan_cache_parts,
     )
@@ -216,56 +197,6 @@ async def test_cors_allows_the_ui_origin_only() -> None:
         )
     assert allowed.headers["access-control-allow-origin"] == "http://localhost:5173"
     assert "access-control-allow-origin" not in refused.headers
-
-
-async def test_refuses_to_start_without_the_mcp_server() -> None:
-    app = create_app(
-        agent_settings(mcp_server_url="http://127.0.0.1:9/mcp", mcp_startup_wait_seconds=0),
-        claude=ScriptedClaude([]),
-    )
-    with pytest.raises(McpServerUnavailableError):
-        async with app.router.lifespan_context(app):
-            pass
-
-
-async def test_waits_for_an_mcp_server_that_starts_later() -> None:
-    mcp_server = create_mcp_server(
-        McpServerSettings(
-            auth_enabled=False, mcp_api_token=None, transaction_service_api_token=None
-        )
-    )
-    attempts: list[int] = []
-
-    def mcp_client_factory() -> Client:
-        attempts.append(1)
-        if len(attempts) == 1:  # first attempt: nothing listening yet
-            return Client(streamable_http_client("http://127.0.0.1:9/mcp"))
-        return Client(mcp_server)
-
-    app = create_app(
-        agent_settings(mcp_startup_wait_seconds=10),
-        claude=ScriptedClaude([]),
-        mcp_client_factory=mcp_client_factory,
-    )
-    async with app.router.lifespan_context(app):
-        pass
-    assert len(attempts) == 2
-
-
-async def test_in_process_mcp_server_answers_without_an_mcp_endpoint() -> None:
-    async with agent_api(searches_then_answers(), mcp_in_process=True) as (client, _):
-        response = await chat(client, "Which transactions have chargebacks?")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["query_plan"]["steps"][0]["tool_name"] == "search_transactions"
-    assert body["result_page"]["total_count"] == 15
-
-
-def test_mcp_token_is_required_over_http_only() -> None:
-    with pytest.raises(ValidationError, match="MCP_API_TOKEN"):
-        agent_settings(mcp_transport="http", mcp_api_token=None)
-    settings = agent_settings(mcp_transport="in_process", mcp_api_token=None)
-    assert settings.mcp_api_token is None
 
 
 # --- Chat, sessions, paging, detail ---

@@ -3,7 +3,7 @@
 Open it once at startup and close it at shutdown, in the same task (the MCP client runs a
 task group that must be entered and exited together):
 
-    async with McpToolGateway.connect_to(url, token) as gateway:
+    async with McpToolGateway(lambda: Client(mcp_server)) as gateway:
         gateway.tool_definitions     # for Claude
         await gateway.call_tool(...)  # never raises for tool or connection failures
 """
@@ -14,12 +14,9 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, Self
 
-import httpx2
 from anthropic.types.beta import BetaToolParam
 from mcp import Client
-from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, TextContent
-from pydantic import SecretStr
 
 from agent_service.mcp_bridge.tool_definition_mapper import to_anthropic_tools
 
@@ -27,7 +24,7 @@ DEFAULT_TOOL_CALL_TIMEOUT_SECONDS = 30.0
 
 
 class McpServerUnavailableError(RuntimeError):
-    """The MCP server could not be reached (or rejected the token) when connecting."""
+    """The MCP server could not be connected to or its tools listed at startup."""
 
 
 @dataclass(frozen=True)
@@ -49,29 +46,6 @@ class McpToolGateway:
         self._exit_stack = AsyncExitStack()
         self._client: Client | None = None
         self._tool_definitions: tuple[BetaToolParam, ...] = ()
-
-    @classmethod
-    def connect_to(
-        cls,
-        mcp_server_url: str,
-        mcp_api_token: SecretStr | None,
-        tool_call_timeout_seconds: float = DEFAULT_TOOL_CALL_TIMEOUT_SECONDS,
-    ) -> Self:
-        def http_client_factory() -> Client:
-            headers = (
-                {"Authorization": f"Bearer {mcp_api_token.get_secret_value()}"}
-                if mcp_api_token is not None
-                else {}
-            )
-            http_client = httpx2.AsyncClient(
-                headers=headers, timeout=httpx2.Timeout(tool_call_timeout_seconds)
-            )
-            return Client(
-                streamable_http_client(mcp_server_url, http_client=http_client),
-                read_timeout_seconds=tool_call_timeout_seconds,
-            )
-
-        return cls(http_client_factory, tool_call_timeout_seconds)
 
     @property
     def tool_definitions(self) -> tuple[BetaToolParam, ...]:

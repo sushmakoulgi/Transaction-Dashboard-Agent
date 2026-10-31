@@ -13,7 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, ValidationError
 
-from mcp_server import tool_descriptions
+from agent_service.mcp_server import tool_descriptions
 from shared.clients.transaction_service_client import (
     TransactionServiceClient,
     TransactionServiceError,

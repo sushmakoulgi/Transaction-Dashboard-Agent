@@ -1,10 +1,10 @@
-"""McpToolGateway against an in-memory test MCP server, and end to end over HTTP."""
+"""McpToolGateway against an in-memory test MCP server."""
 
 import pytest
 from mcp import Client
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel
 
 from agent_service.mcp_bridge.mcp_tool_gateway import (
     McpServerUnavailableError,
@@ -76,14 +76,10 @@ async def test_calling_before_connecting_is_a_programming_error() -> None:
         await in_memory_gateway().call_tool("greet", {"name": "Sam"})
 
 
-async def test_connecting_to_nothing_fails_at_startup() -> None:
+async def test_a_server_that_fails_to_start_fails_at_startup() -> None:
+    def broken_client() -> Client:
+        raise OSError("boom")
+
     with pytest.raises(McpServerUnavailableError, match="could not connect to the MCP server"):
-        async with McpToolGateway.connect_to(
-            "http://127.0.0.1:9/mcp", None, tool_call_timeout_seconds=2
-        ):
+        async with McpToolGateway(broken_client):
             pass
-
-
-def test_connect_to_needs_no_token_when_auth_is_off() -> None:
-    McpToolGateway.connect_to("http://localhost:8100/mcp", None)
-    McpToolGateway.connect_to("http://localhost:8100/mcp", SecretStr("x" * 16))

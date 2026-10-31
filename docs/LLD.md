@@ -68,13 +68,12 @@ Transaction_Dashboard/
 │   │   └── services/
 │   │       ├── search_service.py     # validate → current-year scope → repository; validate(); describe_fields()
 │   │       └── transaction_detail_service.py  # full aggregate; 404 outside the current year
-│   ├── mcp_server/src/mcp_server/
-│   │   ├── main.py                   # create_app(): MCPServer (mcp 2.x), Streamable HTTP, auth, /health
-│   │   ├── settings.py               # McpServerSettings (MCP token, Transaction Service URL + token)
-│   │   ├── tools.py                  # the 5 read-only tools (thin adapters, ToolError on failure)
-│   │   └── tool_descriptions.py      # what Claude reads: filter language, dates, examples
 │   └── agent_service/src/agent_service/
-│       ├── main.py                   # create_app(): lifespan (waits for MCP), CORS, auth, /health
+│       ├── main.py                   # create_app(): lifespan (in-process MCP), CORS, auth, /health
+│       ├── mcp_server/
+│       │   ├── server.py             # create_mcp_server(): MCPServer (mcp 2.x), in-memory only
+│       │   ├── tools.py              # the 5 read-only tools (thin adapters, ToolError on failure)
+│       │   └── tool_descriptions.py  # what Claude reads: filter language, dates, examples
 │       ├── api/
 │       │   ├── routes.py             # /api/chat, /plans/execute, /transactions/{id}, /sessions/...
 │       │   ├── schemas.py            # ChatRequest/Response, ExecutePlanRequest, PlanPageResponse
@@ -488,20 +487,13 @@ class SearchableRepository[ItemT]:
 | 4 By payment | `search_transactions` | `payment_id eq X` |
 | 5 Customer's chargebacks this month | `search_chargebacks` | `customer_id eq X AND opened_at between {relative: this_month}` |
 
-## 5. MCP Server (`:8100`, Streamable HTTP at `/mcp`)
+## 5. MCP Server (in the agent process, no endpoint)
 
-### 5.0 App (`mcp_server/main.py`)
+### 5.0 Server (`agent_service/mcp_server/server.py`)
 - **SDK:** the official `mcp` Python SDK **2.x**, where FastMCP was renamed **`MCPServer`** (`from mcp.server.mcpserver import MCPServer`).
-- **Run:** `make run-mcp-server`, i.e. `uvicorn mcp_server.main:create_app --factory --port 8100`.
-- **Transport:** `streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True)`. Tool calls are self-contained request/response calls, so no session state is kept and answers are plain JSON.
-- **DNS-rebinding protection** stays on (the SDK default). It accepts only `127.0.0.1`, `localhost` and `[::1]` as the Host. Containerizing (P1d-4) will need explicit `allowed_hosts`.
-- **Auth:** `BearerTokenMiddleware` (shared, constant-time) wraps the app. `/mcp` needs `Authorization: Bearer $MCP_API_TOKEN`, which is separate from the Transaction Service token; `/health` is open. Failures return 401 in the shared `ErrorResponse` shape.
-  - We deliberately don't use the SDK's `token_verifier` / `AuthSettings`. That is OAuth resource-server mode: it needs an `issuer_url` and advertises OAuth discovery for an authorization server we don't run.
+- **In-process only:** `create_mcp_server(transaction_service_url, transaction_service_api_token, ...)` builds the server inside the agent service, and the agent connects with the SDK's in-memory `Client(server)`. There is no HTTP app, port, `/mcp` path, URL or MCP token, so nothing outside the agent process can reach the tools (HLD §11.9).
+  - The earlier standalone Streamable HTTP server (`services/mcp_server`, bearer middleware, DNS-rebinding settings, `:8100`) was removed on 2026-10-30.
 - **Lifespan:** creates one `TransactionServiceClient` (`TRANSACTION_SERVICE_URL`, `TRANSACTION_SERVICE_API_TOKEN`) in `McpServerResources`, shared by every tool call.
-- **Verified** under real uvicorn with the SDK's own client:
-  - It lists the tools and calls `ping` (a placeholder until P1b-3).
-  - A wrong or missing token gets 401.
-  - A foreign `Host` header is rejected.
 
 ### 5.1 Tools
 | Tool | Input (flat parameters) | Structured output | Maps to |
@@ -526,7 +518,7 @@ class SearchableRepository[ItemT]:
 
   Arguments that break the JSON schema itself (e.g. `page_size` 1000) are rejected by the SDK before the tool runs.
 - **`validate_filters`** never raises for an invalid filter. It returns `is_valid=false` with the issues, including shape problems.
-- Auth: `Authorization: Bearer <MCP_API_TOKEN>` is checked by middleware. Only the agent holds the token; the server is internal and not offered to outside clients (HLD §11.9).
+- Access: the server has no endpoint; only the agent process can call the tools (HLD §11.9).
 - **`TransactionServiceClient`** (`shared/clients/transaction_service_client.py`) is shared by the MCP server and the agent's `PlanExecutor`.
   - It is one `httpx.AsyncClient` with the bearer token, a 10 s timeout, and typed methods for every endpoint, returning the shared contract models.
   - **Retries:** every endpoint only reads data, so every call (including POST searches) is safe to retry. Retries happen on connection errors, timeouts and 502/503/504, up to 2 times with exponential backoff. 4xx and other 5xx responses are never retried.
@@ -699,22 +691,18 @@ class SessionStore(Protocol):
 
 ### 6.5 MCP bridge (`mcp_bridge/`)
 - **`McpToolGateway`** (`mcp_tool_gateway.py`) is opened once with `async with`, in the agent's lifespan. The MCP client's task group must be entered and exited in the same task.
-  - `connect_to(MCP_SERVER_URL, MCP_API_TOKEN)` builds an `httpx2` client, adding the Bearer header only when a token is configured, and the SDK's `streamable_http_client`.
-  - **Startup:** it connects and runs `list_tools()` once. On any failure (unreachable server, wrong token) it raises one clear `McpServerUnavailableError` naming the cause, instead of the SDK's nested exception groups.
+  - It takes a factory for an unopened MCP client; the agent passes `lambda: Client(mcp_server)` for its in-process server.
+  - **Startup:** it connects and runs `list_tools()` once. On any failure it raises one clear `McpServerUnavailableError` naming the cause, instead of the SDK's nested exception groups.
   - **`tool_definitions`** are the Anthropic tool definitions, sorted by name.
   - **`call_tool(name, arguments) -> ToolCallOutcome(is_error, text, structured_content)`** never raises for tool or transport failures; Claude gets them as error results. It rejects names that are not in the discovered list without calling the server, and returns tool errors (e.g. the JSON `ErrorResponse`) and transport failures as `is_error=True`.
   - A per-call timeout comes from `MCP_TOOL_CALL_TIMEOUT_SECONDS` (default 30 s).
 - **`ToolDefinitionMapper`** (`tool_definition_mapper.py`) maps each MCP `Tool` to `{name, description (or title, or name), input_schema}`, sorted by name. The tool list is then byte-identical between requests.
   - It deep-copies each schema without pydantic's OpenAPI-only `discriminator` keyword. The `oneOf` alternatives (each with a fixed `kind`) keep the same meaning.
-- **`McpConnectionSettings`** holds `MCP_TRANSPORT`, `MCP_SERVER_URL` (default `http://localhost:8100/mcp`) and `MCP_API_TOKEN` (required while `AUTH_ENABLED` and the transport is `http`).
-- **`MCP_TRANSPORT`** (`agent_service/main.py`):
-  - `http` (default): `connect_to(MCP_SERVER_URL, MCP_API_TOKEN)` as above.
-  - `in_process`: `in_process_mcp_server(settings)` builds the MCP server with `create_mcp_server` (same tools, same lifespan) and the gateway connects with the SDK's in-memory `Client(server)`. There is no MCP endpoint, so the server's own bearer check is off and `MCP_SERVER_URL` / `MCP_API_TOKEN` are unused; its calls to the Transaction Service still send `TRANSACTION_SERVICE_API_TOKEN`. `agent-service` depends on the `mcp-server` package for this.
-  - A test runs `/api/chat` end to end with `in_process` and no injected MCP client.
+- **`McpSettings`** holds only `MCP_TOOL_CALL_TIMEOUT_SECONDS`: the server is in-process, so there is no URL, token or transport choice.
+- **Wiring** (`agent_service/main.py`): the lifespan builds the server with `create_mcp_server` (its calls to the Transaction Service still send `TRANSACTION_SERVICE_API_TOKEN`) and opens the gateway on `Client(server)`. Every `/api/chat` test goes through this path.
 - **Tests:**
   - The mapper is tested on the real MCP server's listing (sorted, stable between listings, recursive filter schema kept, no `discriminator`).
-  - The gateway is tested against an in-memory test MCP server (success with structured content, tool error, unknown tool, invalid arguments, not connected, unreachable server).
-  - End to end over real HTTP, with both servers under uvicorn: the 5 tools are discovered, a search goes through the whole chain, validation problems come back, and a wrong token fails at startup.
+  - The gateway is tested against an in-memory test MCP server (success with structured content, tool error, unknown tool, invalid arguments, not connected, a server that fails to start).
 
 ### 6.6 Plan executor (`plan_execution/plan_executor.py`)
 - **`PlanExecutor(transaction_service).execute(plan, page, page_size) -> PlanResultPage(entity, result)`** re-runs the plan's **last search** for any page, straight against the Transaction Service through the shared `TransactionServiceClient`. No Claude call and no MCP hop, so UI paging is free and always shows the same query.
@@ -878,16 +866,14 @@ ui/
 | `postgres` | `postgres:16.4-alpine` | 5432 | — |
 | `db-setup` (one-shot) | `transaction-dashboard-services:local` | — | postgres healthy |
 | `transaction-service` | same | 8200 | db-setup completed |
-| `mcp-server` | same | none: `expose: 8100` on the compose network only (internal, HLD §11.9) | transaction-service healthy |
-| `agent-service` | same | 8000 | mcp-server healthy |
+| `agent-service` | same | 8000 (runs the MCP tools in-process; no MCP container) | transaction-service healthy |
 | `ui` | `transaction-dashboard-ui:local` (nginx) | 5173 → 80 | agent-service healthy |
 | `chroma` | `chromadb/chroma:1.5.9` | 8010 → 8000 (`CHROMA_HOST_PORT`; 8001 is often taken by RedisInsight) | — (the agent doesn't wait for it: without Chroma every question goes to Claude) |
 | `redis` | `redis:7.4-alpine` | 6379 | on hold, only with `--profile phase2` |
 
 - **One Python image** (`services.Dockerfile`): `python:3.12-slim` with uv 0.13.5. `uv sync --frozen --no-dev` installs from the lockfile, with dependencies in their own layer before the sources. It runs as a non-root user (uid 10001). Each container picks its command; the services bind `0.0.0.0`.
 - **`db-setup`** runs `python -m transaction_database.setup`: Alembic `upgrade head` (always), then the sample data **only if `transactions` is empty**, so restarts never replace data (`make seed` still does, on purpose). It was verified on a fresh volume (seeded 100) and again on the second run (skipped).
-- **Configuration:** containers read `.env` (`env_file`), and compose overrides the localhost addresses with in-network names: the DSNs use `@postgres:5432`, `TRANSACTION_SERVICE_URL=http://transaction-service:8200`, `MCP_SERVER_URL=http://mcp-server:8100/mcp`. Host ports are configurable with `*_HOST_PORT`; the MCP server has none, so nothing outside the compose network can reach it.
-- **MCP DNS-rebinding protection is always explicit.** The SDK enables it by itself only when bound to localhost, and a container binds `0.0.0.0`. `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` default to the localhost names; compose adds `mcp-server:*` so the agent can connect. A test checks that `mcp-server:8100` is accepted and `evil.example` is still rejected.
+- **Configuration:** containers read `.env` (`env_file`), and compose overrides the localhost addresses with in-network names: the DSNs use `@postgres:5432`, `TRANSACTION_SERVICE_URL=http://transaction-service:8200`. Host ports are configurable with `*_HOST_PORT`. The MCP server has no container or port: it runs inside the agent.
 - **UI image:** a `node:24-alpine` build stage, then `nginx:1.27-alpine` serving `dist/` (hashed assets cached as immutable, `index.html` revalidated, `/healthz`).
   - `VITE_AGENT_API_URL` and `VITE_AGENT_API_TOKEN` (from `AGENT_API_TOKEN`) are **build arguments**, because Vite compiles them into the bundle.
   - The agent's `CORS_ALLOWED_ORIGINS` follows `UI_HOST_PORT`.
@@ -903,9 +889,6 @@ POSTGRES_DSN_READONLY=postgresql+asyncpg://app_readonly:***@postgres:5432/transa
 POSTGRES_DSN_OWNER=postgresql+psycopg://app_owner:***@postgres:5432/transactions
 TRANSACTION_SERVICE_URL=http://transaction-service:8200
 TRANSACTION_SERVICE_API_TOKEN=***
-MCP_TRANSPORT=http             # or in_process: no MCP endpoint (URL and token unused)
-MCP_SERVER_URL=http://mcp-server:8100/mcp
-MCP_API_TOKEN=***
 ANTHROPIC_API_KEY=***
 PLANNER_MODEL=claude-opus-5-5
 PLANNER_EFFORT=medium

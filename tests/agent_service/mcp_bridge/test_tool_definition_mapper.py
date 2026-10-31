@@ -11,16 +11,11 @@ from agent_service.mcp_bridge.tool_definition_mapper import (
     to_anthropic_tools,
     without_non_standard_keywords,
 )
-from mcp_server.main import create_mcp_server
-from mcp_server.settings import McpServerSettings
+from agent_service.mcp_server.server import create_mcp_server
 
 
 async def real_mcp_tools() -> list[Tool]:
-    server = create_mcp_server(
-        McpServerSettings(
-            auth_enabled=False, mcp_api_token=None, transaction_service_api_token=None
-        )
-    )
+    server = create_mcp_server("http://transaction-service", None)
     async with Client(server) as client:
         return list((await client.list_tools()).tools)
 

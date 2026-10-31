@@ -21,7 +21,6 @@ def openapi_schema() -> dict[str, object]:
     settings = AgentServiceSettings(
         auth_enabled=True,
         agent_api_token=PLACEHOLDER_TOKEN,
-        mcp_api_token=PLACEHOLDER_TOKEN,
         transaction_service_api_token=PLACEHOLDER_TOKEN,
         anthropic_api_key=None,
     )

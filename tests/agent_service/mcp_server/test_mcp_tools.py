@@ -14,8 +14,7 @@ from mcp.types import CallToolResult
 from pydantic import SecretStr
 from sqlalchemy.exc import OperationalError
 
-from mcp_server.main import create_mcp_server
-from mcp_server.settings import McpServerSettings
+from agent_service.mcp_server.server import create_mcp_server
 from shared.config import DatabaseSettings
 from transaction_service.main import create_app
 from transaction_service.settings import TransactionServiceSettings
@@ -23,7 +22,6 @@ from transaction_service.settings import TransactionServiceSettings
 pytestmark = pytest.mark.integration
 
 SERVICE_TOKEN = SecretStr("service-token-0123456789abcdef")
-MCP_TOKEN = SecretStr("mcp-token-0123456789abcdef")
 TOOL_NAMES = {
     "search_transactions",
     "search_chargebacks",
@@ -44,12 +42,8 @@ async def connected_client() -> AsyncIterator[Client]:
         )
     )
     server = create_mcp_server(
-        McpServerSettings(
-            auth_enabled=True,
-            mcp_api_token=MCP_TOKEN,
-            transaction_service_url="http://transaction-service",  # type: ignore[arg-type]
-            transaction_service_api_token=SERVICE_TOKEN,
-        ),
+        "http://transaction-service",
+        SERVICE_TOKEN,
         transaction_service_transport=httpx.ASGITransport(app=service_app),
     )
     try:
@@ -222,13 +216,9 @@ async def test_unknown_transaction_is_reported() -> None:
 
 async def test_unreachable_transaction_service_is_reported() -> None:
     server = create_mcp_server(
-        McpServerSettings(
-            auth_enabled=True,
-            mcp_api_token=MCP_TOKEN,
-            transaction_service_url="http://127.0.0.1:9",  # type: ignore[arg-type]  # nothing there
-            transaction_service_api_token=SERVICE_TOKEN,
-            transaction_service_timeout_seconds=1,
-        )
+        "http://127.0.0.1:9",  # nothing there
+        SERVICE_TOKEN,
+        transaction_service_timeout_seconds=1,
     )
     async with Client(server) as client:
         body = error_body(await call(client, "list_filterable_fields", entity="transactions"))

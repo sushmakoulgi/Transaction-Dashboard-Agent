@@ -7,9 +7,6 @@ from shared.config import BaseServiceSettings
 from shared.config.settings import AuthenticatedServiceSettings, api_token_field
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
-# "http": a separate MCP server at MCP_SERVER_URL. "in_process": the agent runs the MCP server
-# itself and connects in memory, so no MCP endpoint exists on the network.
-McpTransport = Literal["http", "in_process"]
 
 logger = logging.getLogger(__name__)
 
@@ -32,21 +29,10 @@ class ClaudeSettings(BaseServiceSettings):
         return None if isinstance(value, str) and not value.strip() else value
 
 
-class McpConnectionSettings(AuthenticatedServiceSettings):
-    """How the agent reaches the MCP server. Over HTTP the token is needed while AUTH_ENABLED;
-    in process there is no endpoint to protect, so MCP_SERVER_URL and the token are unused."""
+class McpSettings(BaseServiceSettings):
+    """The MCP tools run inside the agent and are reached in memory: no URL or token."""
 
-    mcp_transport: McpTransport = "http"
-    mcp_server_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8100/mcp")
-    mcp_api_token: SecretStr | None = api_token_field()
     mcp_tool_call_timeout_seconds: float = Field(default=30.0, gt=0)
-    mcp_startup_wait_seconds: float = Field(default=20.0, ge=0)  # MCP server may start later
-
-    @model_validator(mode="after")
-    def require_token_when_auth_enabled(self) -> Self:
-        if self.mcp_transport == "http":
-            self.ensure_api_token(self.mcp_api_token, "MCP_API_TOKEN")
-        return self
 
 
 class SessionSettings(BaseServiceSettings):
@@ -101,7 +87,12 @@ class PlanCacheSettings(BaseServiceSettings):
 
 
 class AgentServiceSettings(
-    ClaudeSettings, McpConnectionSettings, SessionSettings, AgentSettings, PlanCacheSettings
+    AuthenticatedServiceSettings,
+    ClaudeSettings,
+    McpSettings,
+    SessionSettings,
+    AgentSettings,
+    PlanCacheSettings,
 ):
     """Everything the agent service reads from the environment / .env."""
 

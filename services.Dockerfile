@@ -1,4 +1,4 @@
-# One image for every Python container (db-setup, transaction-service, mcp-server,
+# One image for every Python container (db-setup, transaction-service,
 # agent-service): the whole uv workspace, installed from the lockfile. Each compose service
 # picks its own command.
 FROM python:3.12-slim
@@ -17,7 +17,6 @@ COPY pyproject.toml uv.lock .python-version ./
 COPY packages/shared/pyproject.toml packages/shared/pyproject.toml
 COPY packages/transaction_database/pyproject.toml packages/transaction_database/pyproject.toml
 COPY services/transaction_service/pyproject.toml services/transaction_service/pyproject.toml
-COPY services/mcp_server/pyproject.toml services/mcp_server/pyproject.toml
 COPY services/agent_service/pyproject.toml services/agent_service/pyproject.toml
 RUN uv sync --frozen --no-dev --no-install-workspace
 

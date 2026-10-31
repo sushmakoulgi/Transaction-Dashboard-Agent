@@ -14,14 +14,13 @@ from sqlalchemy.exc import OperationalError
 
 from agent_service.agent.query_agent import QueryAgent
 from agent_service.mcp_bridge.mcp_tool_gateway import McpToolGateway
+from agent_service.mcp_server.server import create_mcp_server
 from agent_service.memory.session_store import InMemorySessionStore
 from agent_service.plan_execution.plan_executor import (
     InvalidPageRequestError,
     PlanExecutor,
     PlanHasNoSearchError,
 )
-from mcp_server.main import create_mcp_server
-from mcp_server.settings import McpServerSettings
 from shared.clients.transaction_service_client import TransactionServiceClient
 from shared.clock import SystemClock
 from shared.config import DatabaseSettings
@@ -120,12 +119,8 @@ async def test_rerunning_the_agents_plan_returns_the_same_page() -> None:
         )
     )
     mcp_server = create_mcp_server(
-        McpServerSettings(
-            auth_enabled=False,
-            mcp_api_token=None,
-            transaction_service_url="http://transaction-service",  # type: ignore[arg-type]
-            transaction_service_api_token=SERVICE_TOKEN,
-        ),
+        "http://transaction-service",
+        SERVICE_TOKEN,
         transaction_service_transport=httpx.ASGITransport(app=service_app),
     )
     claude = ScriptedClaude(
