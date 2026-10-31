@@ -54,6 +54,7 @@ def create_app(
             str(service_settings.postgres_dsn_readonly),
             pool_size=service_settings.database_pool_size,
             max_overflow=service_settings.database_max_overflow,
+            iam_auth=service_settings,
         )
         try:
             await database.ensure_cannot_write()  # refuse to start with a writable account

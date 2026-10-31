@@ -2,10 +2,11 @@ from typing import Self
 
 from pydantic import Field, PostgresDsn, SecretStr, model_validator
 
+from shared.config import DatabaseIamAuthSettings
 from shared.config.settings import AuthenticatedServiceSettings, api_token_field
 
 
-class TransactionServiceSettings(AuthenticatedServiceSettings):
+class TransactionServiceSettings(AuthenticatedServiceSettings, DatabaseIamAuthSettings):
     postgres_dsn_readonly: PostgresDsn
     transaction_service_api_token: SecretStr | None = api_token_field()
     business_timezone: str = "America/New_York"

@@ -1,3 +1,3 @@
-from shared.config.settings import BaseServiceSettings, DatabaseSettings
+from shared.config.settings import BaseServiceSettings, DatabaseIamAuthSettings, DatabaseSettings
 
-__all__ = ["BaseServiceSettings", "DatabaseSettings"]
+__all__ = ["BaseServiceSettings", "DatabaseIamAuthSettings", "DatabaseSettings"]

@@ -1,9 +1,9 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine
 
 from shared.config import DatabaseSettings
+from transaction_database.connection import database_engine
 from transaction_database.orm_models import Base
 
 if context.config.config_file_name is not None:
@@ -12,8 +12,7 @@ if context.config.config_file_name is not None:
 
 
 def owner_database_url() -> str:
-    settings = DatabaseSettings()  # values come from the environment
-    return str(settings.postgres_dsn_owner)
+    return str(DatabaseSettings().postgres_dsn_owner)  # values come from the environment
 
 
 def run_migrations_offline() -> None:
@@ -28,7 +27,8 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    engine = create_engine(owner_database_url())
+    settings = DatabaseSettings()
+    engine = database_engine(str(settings.postgres_dsn_owner), settings)
     with engine.connect() as connection:
         context.configure(connection=connection, target_metadata=Base.metadata, compare_type=True)
         with context.begin_transaction():

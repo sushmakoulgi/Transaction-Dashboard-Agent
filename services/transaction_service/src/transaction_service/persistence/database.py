@@ -11,7 +11,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from shared.config import DatabaseIamAuthSettings
+from transaction_database.connection import async_database_engine
 
 TABLES_WITH_WRITE_ACCESS = text(
     """
@@ -31,9 +34,20 @@ class WritableDatabaseAccountError(RuntimeError):
 
 
 class ReadOnlyDatabase:
-    def __init__(self, database_url: str, pool_size: int = 5, max_overflow: int = 5) -> None:
-        self._engine = create_async_engine(
-            database_url, pool_size=pool_size, max_overflow=max_overflow, pool_pre_ping=True
+    def __init__(
+        self,
+        database_url: str,
+        pool_size: int = 5,
+        max_overflow: int = 5,
+        iam_auth: DatabaseIamAuthSettings | None = None,
+    ) -> None:
+        """`iam_auth` signs in with IAM tokens when its DATABASE_IAM_AUTH is on (Aurora)."""
+        self._engine = async_database_engine(
+            database_url,
+            iam_auth,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_pre_ping=True,
         )
         self._session_factory = async_sessionmaker(
             self._engine, expire_on_commit=False, autoflush=False

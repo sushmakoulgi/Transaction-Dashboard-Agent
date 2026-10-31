@@ -5,6 +5,7 @@ description = "Read-only REST API for searching transactions and chargebacks wit
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "mangum>=0.19",  # AWS Lambda adapter (transaction_service.lambda_handler)
     "pydantic-settings>=2.6",
     "shared",
     "sqlalchemy[asyncio]>=2.0.36",

@@ -29,6 +29,19 @@ def api_token_field() -> SecretStr | None:
     return Field(default=None, min_length=MIN_API_TOKEN_LENGTH)
 
 
-class DatabaseSettings(BaseServiceSettings):
+class DatabaseIamAuthSettings(BaseServiceSettings):
+    """IAM database authentication (Amazon Aurora / RDS), e.g. an express-configuration cluster.
+
+    When on, the database URLs carry no password: every new connection signs a 15-minute
+    token with the AWS credentials of DATABASE_AWS_PROFILE (or the default chain), and SSL is
+    required. Off by default, for the local Postgres with passwords.
+    """
+
+    database_iam_auth: bool = False
+    database_aws_region: str | None = None  # the cluster's Region; else the profile's
+    database_aws_profile: str | None = None  # a profile in ~/.aws/config; else the default
+
+
+class DatabaseSettings(DatabaseIamAuthSettings):
     postgres_dsn_owner: PostgresDsn
     postgres_dsn_readonly: PostgresDsn

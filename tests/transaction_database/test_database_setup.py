@@ -1,9 +1,10 @@
 """Integration test: first-run setup migrates and never replaces existing data."""
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
+from transaction_database.connection import database_engine
 from transaction_database.seed.sample_data_seeder import SeedSettings
 from transaction_database.setup import ALEMBIC_INI, set_up_database
 
@@ -16,7 +17,7 @@ def test_alembic_config_is_found() -> None:
 
 def test_setup_keeps_existing_data() -> None:
     settings = SeedSettings()
-    engine = create_engine(str(settings.postgres_dsn_owner))
+    engine = database_engine(str(settings.postgres_dsn_owner), settings)
     try:
         with engine.connect() as connection:
             before = connection.execute(

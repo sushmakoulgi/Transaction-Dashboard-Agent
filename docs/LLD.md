@@ -883,6 +883,14 @@ ui/
   - `alembic.ini`'s WARNING root level hid setup messages, so the package logger is set to INFO.
   - The setup logger is named explicitly, because under `python -m` `__name__` is `__main__`.
 
+## 8b. Amazon Aurora PostgreSQL with IAM sign-in (optional)
+- **Why:** an express-configuration Aurora cluster accepts IAM auth tokens only (no passwords) and is reached through its Internet Access Gateway, with no VPC.
+- **`transaction_database/connection.py`:** `database_engine` / `async_database_engine` wrap SQLAlchemy's engine factories. With `DATABASE_IAM_AUTH=true` a `do_connect` hook signs a fresh token (`boto3` `generate_db_auth_token`, local signing, no AWS call) for every new physical connection and sets `sslmode=require` unless the URL asks for more. Tokens last 15 minutes but are only checked at sign-in, so pooled connections keep working. The URL must have no password. Used by the Transaction Service (`ReadOnlyDatabase`), migrations, seed, `db-setup` and the integration tests.
+- **Settings (`DatabaseIamAuthSettings`):** `DATABASE_IAM_AUTH` (default false), `DATABASE_AWS_REGION`, `DATABASE_AWS_PROFILE`. `boto3[crt]` is needed for `aws login` profiles.
+- **`make aurora-bootstrap`** (`transaction_database/aurora_bootstrap.py`, idempotent): as the cluster admin (`postgres`) it creates the database and `app_owner` / `app_readonly` with `rds_iam` instead of passwords, plus the same grants and read-only defaults as `database/initdb/`. Then `make migrate seed`.
+- **Docker:** `make up-stack-aurora` adds `docker-compose.aurora.yml`, which passes the `.env` URLs to `db-setup` and `transaction-service`, mounts `~/.aws` (writable: `aws login` refreshes its cached token) and starts no local Postgres.
+- **IAM permission:** the signing identity needs `rds-db:connect` on `arn:aws:rds-db:<region>:<account>:dbuser:<cluster-resource-id>/<db user>`.
+
 ## 9. Configuration (`.env.example`)
 ```
 POSTGRES_DSN_READONLY=postgresql+asyncpg://app_readonly:***@postgres:5432/transactions

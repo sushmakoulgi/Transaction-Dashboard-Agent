@@ -1,0 +1,22 @@
+# Runs the stack against Amazon Aurora PostgreSQL (IAM sign-in) instead of the local Postgres:
+#   make up-stack-aurora   (docker compose -f docker-compose.yml -f docker-compose.aurora.yml up)
+#
+# Uses POSTGRES_DSN_OWNER / POSTGRES_DSN_READONLY (no password), DATABASE_IAM_AUTH=true,
+# DATABASE_AWS_REGION and DATABASE_AWS_PROFILE from .env. Run `make aurora-bootstrap` once first.
+
+x-aurora-database: &aurora-database
+  environment:
+    POSTGRES_DSN_OWNER: ${POSTGRES_DSN_OWNER}
+    POSTGRES_DSN_READONLY: ${POSTGRES_DSN_READONLY}
+  volumes:
+    # AWS credentials to sign IAM database tokens. Writable because `aws login` sessions
+    # refresh their cached token.
+    - ${HOME}/.aws:/home/app/.aws
+
+services:
+  db-setup:
+    <<: *aurora-database
+    depends_on: !reset {}  # no local Postgres to wait for
+
+  transaction-service:
+    <<: *aurora-database

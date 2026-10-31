@@ -10,8 +10,9 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Engine, create_engine, func, select
+from sqlalchemy import Engine, func, select
 
+from transaction_database.connection import database_engine
 from transaction_database.orm_models import Transaction
 from transaction_database.seed.sample_data_seeder import SeedSettings, seed_sample_data
 
@@ -32,7 +33,7 @@ def has_transactions(engine: Engine) -> bool:
 def set_up_database(settings: SeedSettings) -> bool:
     """Migrates, then seeds an empty database. Returns whether sample data was loaded."""
     apply_migrations()
-    engine = create_engine(str(settings.postgres_dsn_owner))
+    engine = database_engine(str(settings.postgres_dsn_owner), settings)
     try:
         if has_transactions(engine):
             logger.info("Database already has data; not seeding")

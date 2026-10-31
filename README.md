@@ -33,5 +33,22 @@ Host ports can be changed with `*_HOST_PORT` variables (see `.env.example`).
 `make run-agent-service` and `make ui-dev`, or with the VS Code launch
 configurations. `make test`, `make lint` and `make ui-test` run the checks.
 
+## Using Amazon Aurora PostgreSQL instead of the local Postgres
+
+The services can use an Aurora PostgreSQL cluster with IAM sign-in (e.g. an express-configuration
+cluster, which has no passwords). Every new connection signs a 15-minute IAM token with your AWS
+profile and uses SSL; the app roles `app_owner` / `app_readonly` sign in with tokens only.
+
+1. Sign in to AWS (`aws login --profile <profile>`) and make sure the cluster is running.
+2. In `.env`, point `POSTGRES_DSN_OWNER` / `POSTGRES_DSN_READONLY` at the cluster endpoint without
+   a password and set `DATABASE_IAM_AUTH=true`, `DATABASE_AWS_REGION` and `DATABASE_AWS_PROFILE`
+   (see `.env.example`).
+3. Once per cluster: `make aurora-bootstrap migrate seed` (database, roles, schema, sample data).
+4. Run on the host as usual (`make run-transaction-service`, ...) or in Docker with
+   `make up-stack-aurora`, which mounts `~/.aws` into the database containers.
+
+Set `DATABASE_IAM_AUTH=false` and restore the local URLs to go back to Docker Postgres. The
+integration tests follow `.env`, so they run against whichever database it points at.
+
 Design: [docs/HLD.md](docs/HLD.md) (architecture) and [docs/LLD.md](docs/LLD.md) (details
 and task list).
