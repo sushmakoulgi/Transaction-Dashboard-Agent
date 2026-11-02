@@ -11,6 +11,7 @@ from agent_service.llm.claude_client import (
     ClaudeUnavailableError,
     ClaudeUnexpectedStopError,
 )
+from agent_service.memory.dynamodb_session_store import SessionStoreUnavailableError
 from agent_service.memory.session_store import InvalidSessionIdError
 from agent_service.plan_execution.plan_executor import (
     InvalidPageRequestError,
@@ -67,6 +68,9 @@ def register_error_handlers(app: FastAPI) -> None:
         ),
         ClaudeUnexpectedStopError: error_handler(
             status.HTTP_502_BAD_GATEWAY, "CLAUDE_REPLY_ERROR", str
+        ),
+        SessionStoreUnavailableError: error_handler(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "SESSION_STORE_UNAVAILABLE", str
         ),
         TransactionServiceUnavailableError: error_handler(
             status.HTTP_503_SERVICE_UNAVAILABLE, "TRANSACTION_SERVICE_UNAVAILABLE", str

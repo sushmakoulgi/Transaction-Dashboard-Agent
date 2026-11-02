@@ -12,6 +12,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 import anthropic
+import boto3
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +26,8 @@ from agent_service.api.routes import router
 from agent_service.llm.claude_client import ClaudeClient
 from agent_service.mcp_bridge.mcp_tool_gateway import McpToolGateway
 from agent_service.mcp_server.server import create_mcp_server
-from agent_service.memory.session_store import InMemorySessionStore
+from agent_service.memory.dynamodb_session_store import DynamoDbSessionStore
+from agent_service.memory.session_store import InMemorySessionStore, SessionStore
 from agent_service.plan_cache.chroma_connection import ChromaConnection
 from agent_service.plan_cache.chroma_plan_store import ChromaPlanStore
 from agent_service.plan_cache.embedding_provider import EmbeddingProvider, VoyageEmbeddingProvider
@@ -38,6 +40,29 @@ from shared.clients.transaction_service_client import TransactionServiceClient
 from shared.clock import Clock, SystemClock
 from shared.contracts import HealthStatus
 from shared.http.bearer_auth import bearer_token_dependencies
+
+
+def build_session_store(settings: AgentServiceSettings, clock: Clock) -> SessionStore:
+    limit = settings.session_context_question_limit
+    idle_timeout = timedelta(minutes=settings.session_idle_ttl_minutes)
+    if settings.session_store == "memory":
+        return InMemorySessionStore(limit, idle_timeout, clock)
+    endpoint = settings.session_dynamodb_endpoint_url
+    session = boto3.Session(
+        profile_name=settings.session_aws_profile, region_name=settings.session_aws_region
+    )
+    if endpoint:  # DynamoDB Local accepts any credentials
+        client = session.client(
+            "dynamodb",
+            endpoint_url=str(endpoint),
+            aws_access_key_id="local",
+            aws_secret_access_key="local",
+        )
+    else:  # AWS: the profile (locally) or the service's role
+        client = session.client("dynamodb")
+    return DynamoDbSessionStore(
+        client, str(settings.session_table_name), limit, idle_timeout, clock
+    )
 
 
 @dataclass(frozen=True)
@@ -103,6 +128,7 @@ def create_app(
             mcp_server = create_mcp_server(
                 str(service_settings.transaction_service_url),
                 service_settings.transaction_service_api_token,
+                service_settings.transaction_service_timeout_seconds,
                 transaction_service_transport=transaction_service_transport,
             )
             gateway = await resources.enter_async_context(
@@ -114,6 +140,7 @@ def create_app(
                 TransactionServiceClient(
                     str(service_settings.transaction_service_url),
                     service_settings.transaction_service_api_token,
+                    timeout_seconds=service_settings.transaction_service_timeout_seconds,
                     transport=transaction_service_transport,
                 )
             )
@@ -122,11 +149,7 @@ def create_app(
                 claude_client = ClaudeClient(service_settings)
                 resources.push_async_callback(claude_client.aclose)
                 claude_messenger = claude_client
-            sessions = InMemorySessionStore(
-                service_settings.session_context_question_limit,
-                timedelta(minutes=service_settings.session_idle_ttl_minutes),
-                service_clock,
-            )
+            sessions = build_session_store(service_settings, service_clock)
             # Opened on first use, never at startup: the agent doesn't wait for Chroma.
             chroma = ChromaConnection(
                 service_settings.chroma_url, service_settings.chroma_timeout_seconds

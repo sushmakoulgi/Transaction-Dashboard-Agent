@@ -1,13 +1,45 @@
+import os
+
 from pydantic import Field, PostgresDsn, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    AWSSecretsManagerSettingsSource,
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 MIN_API_TOKEN_LENGTH = 16
+# Names an AWS Secrets Manager secret (JSON object, keys like ANTHROPIC_API_KEY) to read
+# settings from, e.g. on AWS Lambda, so secrets are never plain environment variables there.
+SETTINGS_SECRET_ID_VARIABLE = "SETTINGS_SECRET_ID"
 
 
 class BaseServiceSettings(BaseSettings):
-    """Reads settings from environment variables, falling back to a local `.env` file."""
+    """Reads settings from environment variables, then a local `.env` file, then (when
+    SETTINGS_SECRET_ID is set) an AWS Secrets Manager secret, in that order of precedence."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # hide_input_in_errors: a bad or missing setting names the field but never prints the
+    # values that were read (API tokens, keys), e.g. into a Lambda's CloudWatch logs.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        sources = [init_settings, env_settings, dotenv_settings]
+        secret_id = os.environ.get(SETTINGS_SECRET_ID_VARIABLE)
+        if secret_id:  # read once per settings object; region and credentials from boto3
+            sources.append(
+                AWSSecretsManagerSettingsSource(settings_cls, secret_id, case_sensitive=False)
+            )
+        return (*sources, file_secret_settings)
 
 
 class AuthenticatedServiceSettings(BaseServiceSettings):

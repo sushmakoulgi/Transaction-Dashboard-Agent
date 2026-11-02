@@ -7,6 +7,9 @@ from shared.config import BaseServiceSettings
 from shared.config.settings import AuthenticatedServiceSettings, api_token_field
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
+# "memory": one process only (local development). "dynamodb": shared by every instance of the
+# agent, e.g. on AWS Lambda, where requests of one session can reach different instances.
+SessionStoreKind = Literal["memory", "dynamodb"]
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,17 @@ class McpSettings(BaseServiceSettings):
 class SessionSettings(BaseServiceSettings):
     session_context_question_limit: int = Field(default=10, ge=1, le=50)
     session_idle_ttl_minutes: int = Field(default=120, ge=1)
+    session_store: SessionStoreKind = "memory"
+    session_table_name: str | None = None  # required for "dynamodb"
+    session_aws_region: str | None = None  # else the default (AWS_REGION, the profile's)
+    session_aws_profile: str | None = None  # local use; on AWS the service's role signs
+    session_dynamodb_endpoint_url: AnyHttpUrl | None = None  # DynamoDB Local (make dynamodb-local)
+
+    @model_validator(mode="after")
+    def require_table_for_dynamodb(self) -> Self:
+        if self.session_store == "dynamodb" and not self.session_table_name:
+            raise ValueError("SESSION_TABLE_NAME is required when SESSION_STORE is dynamodb")
+        return self
 
 
 class AgentSettings(BaseServiceSettings):
@@ -99,6 +113,9 @@ class AgentServiceSettings(
     agent_api_token: SecretStr | None = api_token_field()  # what the UI sends (AUTH_ENABLED)
     transaction_service_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8200")
     transaction_service_api_token: SecretStr | None = api_token_field()
+    # Per attempt (the client retries timeouts twice). Raise it for a Transaction Service on
+    # Lambda, whose first request after idle waits for a cold start and Aurora to resume.
+    transaction_service_timeout_seconds: float = Field(default=10.0, gt=0)
     cors_allowed_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173"]  # the Vite dev server
     )

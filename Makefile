@@ -1,6 +1,6 @@
 ALEMBIC := uv run alembic -c packages/transaction_database/alembic.ini
 
-.PHONY: install up up-stack up-stack-aurora logs up-phase2 down reset-db migrate seed aurora-bootstrap run-transaction-service run-agent-service lambda-package ui-install ui-dev ui-test ui-api-types lint format test
+.PHONY: install up up-stack up-stack-aurora logs up-phase2 dynamodb-local down reset-db migrate seed aurora-bootstrap run-transaction-service run-agent-service lambda-package push-transaction-service-image rotate-tokens push-secrets ui-install ui-dev ui-test ui-api-types lint format test
 
 install:
 	uv sync
@@ -22,8 +22,12 @@ logs:
 up-phase2:
 	docker compose --profile phase2 up -d --wait
 
+# DynamoDB Local on localhost:8020 (session store tests; SESSION_DYNAMODB_ENDPOINT_URL for local runs).
+dynamodb-local:
+	docker compose --profile dynamodb up -d dynamodb-local
+
 down:
-	docker compose --profile phase2 down
+	docker compose --profile phase2 --profile dynamodb down
 
 # Deletes the database volume, so the role init script runs again on the next `make up`.
 reset-db:
@@ -61,6 +65,30 @@ lambda-package:
 	uv pip install --quiet $(LAMBDA_TARGET) --no-deps packages/shared packages/transaction_database services/transaction_service
 	cd $(LAMBDA_BUILD)/package && zip -qr ../transaction-service.zip .
 	@du -sh $(LAMBDA_BUILD)/package $(LAMBDA_BUILD)/transaction-service.zip
+
+# The Transaction Service container image (Lambda / ECS) to Amazon ECR, under a new tag each
+# time (the repository's tags are immutable). Prints the image URI to deploy.
+AWS_PROFILE_NAME ?= sushma
+AWS_REGION_NAME ?= us-east-1
+ECR_REGISTRY ?= 219806732458.dkr.ecr.$(AWS_REGION_NAME).amazonaws.com
+ifndef IMAGE_TAG
+IMAGE_TAG := $(shell git rev-parse --short HEAD)-$(shell date +%Y%m%d%H%M%S)
+endif
+TRANSACTION_SERVICE_IMAGE := $(ECR_REGISTRY)/transaction-service:$(IMAGE_TAG)
+
+push-transaction-service-image:
+	aws ecr get-login-password --region $(AWS_REGION_NAME) --profile $(AWS_PROFILE_NAME) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+	docker build --platform linux/arm64 --provenance=false -f transaction_service.Dockerfile -t $(TRANSACTION_SERVICE_IMAGE) .
+	docker push $(TRANSACTION_SERVICE_IMAGE)
+	@echo "Pushed $(TRANSACTION_SERVICE_IMAGE)"
+
+# New random service tokens in .env (and the UI's in ui/.env.local); nothing is printed.
+rotate-tokens:
+	uv run python deploy/manage_secrets.py rotate-tokens
+
+# .env values into the agent service's AWS Secrets Manager secret (read via SETTINGS_SECRET_ID).
+push-secrets:
+	uv run python deploy/manage_secrets.py push --profile $(AWS_PROFILE_NAME) --region $(AWS_REGION_NAME)
 
 ui-install:
 	cd ui && npm install

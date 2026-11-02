@@ -23,6 +23,7 @@ version = "0.1.0"
 source = { editable = "services/agent_service" }
 dependencies = [
     { name = "anthropic" },
+    { name = "boto3", extra = ["crt"] },
     { name = "chromadb-client" },
     { name = "mcp" },
     { name = "pydantic-settings" },
@@ -33,6 +34,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=1.0" },
+    { name = "boto3", extras = ["crt"], specifier = ">=1.40" },
     { name = "chromadb-client", specifier = ">=1.5.9,<2" },
     { name = "mcp", specifier = ">=2.3" },
     { name = "pydantic-settings", specifier = ">=2.6" },
@@ -242,8 +244,14 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+dynamodb = [
+    { name = "mypy-boto3-dynamodb" },
+]
 rds = [
     { name = "mypy-boto3-rds" },
+]
+secretsmanager = [
+    { name = "mypy-boto3-secretsmanager" },
 ]
 
 [[package]]
@@ -1272,12 +1280,30 @@ wheels = [
 ]
 
 [[package]]
+name = "mypy-boto3-dynamodb"
+version = "1.43.116"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/50/a7/f68dd94c543055ca8e4bc24953b781da895c5423ba197bc881ce6b6250fb/mypy_boto3_dynamodb-1.43.116.tar.gz", hash = "sha256:43b158cdb563004bb0b6e63af790557755bb53c96e9eabbfdb97c2b0e5bcadca", size = 50666, upload-time = "2026-10-20T21:59:46.411Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/79/08/79edd621298ff0c7e4ea066bd0be525c96d8a4168246651817f15272ae63/mypy_boto3_dynamodb-1.43.116-py3-none-any.whl", hash = "sha256:fa594df0da61fadd73113b819094d65fb68c751e3edfac5c7e61a14b7e907fab", size = 60913, upload-time = "2026-10-20T21:59:43.677Z" },
+]
+
+[[package]]
 name = "mypy-boto3-rds"
 version = "1.43.116"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/07/18/84a1a8a2de941eedc8e63d9a8a1d4a790403a94fd6a6e251264bbe6dae73/mypy_boto3_rds-1.43.116.tar.gz", hash = "sha256:b517acb5c0178eef3729a17d48615da6695808b2fcdc475367ff829542dc58ae", size = 89491, upload-time = "2026-10-20T21:59:57.768Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1c/2a/208e3970f37478477574416e75fd00997f56fba49dcbbd75f7f95223366d/mypy_boto3_rds-1.43.116-py3-none-any.whl", hash = "sha256:e955686816cf240ca5ae2c9f75d0608eaa0272ee296e2bd43ac745df84d632db", size = 96432, upload-time = "2026-10-20T21:59:53.665Z" },
+]
+
+[[package]]
+name = "mypy-boto3-secretsmanager"
+version = "1.43.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/e0/3b9f954dcce063407224e6601ed5af2d684185387b0572901c5f984fc8f6/mypy_boto3_secretsmanager-1.43.0.tar.gz", hash = "sha256:265ee2fddf9d3e42ae39685625fb7861a539110d8e324372847c0e1cbd666b20", size = 19967, upload-time = "2026-04-29T23:05:45.139Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/93/ae939d61eed240972553395b5e31f780825685b99f0ab4ebe5767430f103/mypy_boto3_secretsmanager-1.43.0-py3-none-any.whl", hash = "sha256:38415cdecb73dd20e485707a7cf456f6dde54ff4b155e7fb255eb001eb47d5bc", size = 27335, upload-time = "2026-04-29T23:05:43.152Z" },
 ]
 
 [[package]]
@@ -2382,7 +2408,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "boto3-stubs", extra = ["rds"] },
+    { name = "boto3-stubs", extra = ["dynamodb", "rds", "secretsmanager"] },
     { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
@@ -2400,7 +2426,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "boto3-stubs", extras = ["rds"], specifier = ">=1.40" },
+    { name = "boto3-stubs", extras = ["dynamodb", "rds", "secretsmanager"], specifier = ">=1.40" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=8.3" },

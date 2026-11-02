@@ -118,6 +118,14 @@ services:
         - "exec 3<>/dev/tcp/127.0.0.1/8000 && printf 'GET /api/v2/heartbeat HTTP/1.0\r\n\r\n' >&3 && grep -q nanosecond <&3"
       <<: *healthcheck-timing
 
+  # Local stand-in for the agent's DynamoDB session table (SESSION_STORE=dynamodb), for tests
+  # and local runs: `make dynamodb-local`. In memory: sessions vanish when it stops.
+  dynamodb-local:
+    image: amazon/dynamodb-local:3.1.0
+    profiles: ["dynamodb"]
+    ports:
+      - "${DYNAMODB_LOCAL_HOST_PORT:-8020}:8000"
+
   # On hold (Phase 2b, decided from the plan cache's exact_match_rate): `--profile phase2`.
   redis:
     image: redis:7.4-alpine
