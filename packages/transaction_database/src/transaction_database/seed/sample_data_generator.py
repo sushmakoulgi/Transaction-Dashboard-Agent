@@ -2,13 +2,19 @@
 
 The same `random_seed` and `reference_time` always produce the same dataset. Rows are
 plain dicts keyed by column name, ready for SQLAlchemy Core bulk inserts.
+
+Two shapes:
+- default: `transaction_count` transactions at random times over the last `history_days`,
+  a share of them in the current month (the tests rely on this one).
+- daily (`daily_from` set): a few transactions on every business day from that date to now,
+  so any day or date range can be searched (demos).
 """
 
 import random
 import string
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -38,6 +44,10 @@ class SampleDataProfile:
     refunded_payment_share: float = 0.20
     chargeback_count: int = 15
     current_month_chargeback_share: float = 0.50
+    # Daily shape: transactions on every business day from this date (not before Jan 1).
+    daily_from: date | None = None
+    transactions_per_day: tuple[int, int] = (3, 6)  # inclusive range, per day
+    daily_chargeback_share: float = 0.10  # of all transactions; replaces chargeback_count
 
 
 @dataclass
@@ -146,16 +156,22 @@ class SampleDataGenerator:
     ) -> None:
         if reference_time.tzinfo is None:
             raise ValueError("reference_time must be timezone-aware")
+        if profile is not None and profile.daily_from is not None:
+            low, high = profile.transactions_per_day
+            if not 1 <= low <= high:
+                raise ValueError("transactions_per_day must be a range like (3, 6)")
         self._random = random.Random(random_seed)
         self._issued_ids: set[str] = set()
         self._profile = profile or SampleDataProfile()
+        self._business_timezone = business_timezone
         self._reference_time = reference_time.astimezone(UTC)
         local_month_start = reference_time.astimezone(business_timezone).replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
         self._current_month_start = local_month_start.astimezone(UTC)
         # Only the current year is searchable, so history never reaches before Jan 1.
-        current_year_start = local_month_start.replace(month=1).astimezone(UTC)
+        self._current_year_start = local_month_start.replace(month=1).astimezone(UTC)
+        current_year_start = self._current_year_start
         self._history_start = max(
             self._reference_time - timedelta(days=self._profile.history_days), current_year_start
         )
@@ -163,27 +179,43 @@ class SampleDataGenerator:
 
     def generate(self) -> SampleDataset:
         dataset = SampleDataset()
-        for _ in range(self._profile.transaction_count):
-            transaction = self._build_transaction()
+        transaction_dates = (
+            self._daily_transaction_dates()
+            if self._profile.daily_from is not None
+            else [None] * self._profile.transaction_count
+        )
+        for transaction_date in transaction_dates:
+            transaction = self._build_transaction(transaction_date)
             dataset.transactions.append(transaction)
             dataset.payments.append(self._build_payment(transaction))
         refunded_payment_ids = self._add_refunds(dataset)
         self._add_chargebacks(dataset, refunded_payment_ids)
         return dataset
 
-    def _build_transaction(self) -> Row:
-        is_in_current_month = (
-            self._random.random() < self._profile.current_month_transaction_share
-            or not self._has_earlier_months
+    def _daily_transaction_dates(self) -> list[datetime]:
+        """A few random times on every business day from `daily_from` up to now, in order."""
+        assert self._profile.daily_from is not None
+        low, high = self._profile.transactions_per_day
+        local_now = self._reference_time.astimezone(self._business_timezone)
+        day = max(
+            self._profile.daily_from,
+            self._current_year_start.astimezone(self._business_timezone).date(),
         )
-        if is_in_current_month:
-            transaction_date = self._random_time_between(
-                self._current_month_start, self._reference_time
+        dates: list[datetime] = []
+        while day <= local_now.date():
+            start = datetime.combine(day, time(), self._business_timezone).astimezone(UTC)
+            end = min(start + timedelta(days=1), self._reference_time)
+            dates += sorted(
+                self._random_time_between(start, end)
+                for _ in range(self._random.randint(low, high))
             )
-        else:
-            transaction_date = self._random_time_between(
-                self._history_start, self._current_month_start
-            )
+            day += timedelta(days=1)
+        return dates
+
+    def _build_transaction(self, transaction_date: datetime | None = None) -> Row:
+        """`transaction_date` None: pick one the default way (current month or history)."""
+        if transaction_date is None:
+            transaction_date = self._default_transaction_date()
         merchant = self._random.choice(MERCHANTS)
         return {
             "transaction_id": self._unique_transaction_id(),
@@ -201,6 +233,15 @@ class SampleDataGenerator:
                 "ip_country": merchant["country"],
             },
         }
+
+    def _default_transaction_date(self) -> datetime:
+        is_in_current_month = (
+            self._random.random() < self._profile.current_month_transaction_share
+            or not self._has_earlier_months
+        )
+        if is_in_current_month:
+            return self._random_time_between(self._current_month_start, self._reference_time)
+        return self._random_time_between(self._history_start, self._current_month_start)
 
     def _build_payment(self, transaction: Row) -> Row:
         payment_method = self._random.choices(tuple(PaymentMethod), weights=(70, 20, 10))[0]
@@ -325,11 +366,18 @@ class SampleDataGenerator:
             and payment["payment_method"] != PaymentMethod.ACH
             and payment["payment_id"] not in refunded_payment_ids
         ]
-        selected_pairs = self._random.sample(
-            eligible_pairs, min(self._profile.chargeback_count, len(eligible_pairs))
+        is_daily = self._profile.daily_from is not None
+        wanted = (
+            round(len(dataset.transactions) * self._profile.daily_chargeback_share)
+            if is_daily
+            else self._profile.chargeback_count
         )
-        current_month_target = round(
-            len(selected_pairs) * self._profile.current_month_chargeback_share
+        selected_pairs = self._random.sample(eligible_pairs, min(wanted, len(eligible_pairs)))
+        # Daily data is spread evenly already: chargebacks open any time after the capture.
+        current_month_target = (
+            0
+            if is_daily
+            else round(len(selected_pairs) * self._profile.current_month_chargeback_share)
         )
         for index, (transaction, payment) in enumerate(selected_pairs):
             chargeback = self._build_chargeback(
@@ -365,6 +413,8 @@ class SampleDataGenerator:
     def _chargeback_opened_at(
         self, captured_at: datetime, opens_in_current_month: bool
     ) -> datetime:
+        if self._profile.daily_from is not None:
+            return self._random_time_between(captured_at, self._reference_time)
         captured_before_current_month = captured_at < self._current_month_start
         if opens_in_current_month or not captured_before_current_month:
             window_start = max(captured_at, self._current_month_start)

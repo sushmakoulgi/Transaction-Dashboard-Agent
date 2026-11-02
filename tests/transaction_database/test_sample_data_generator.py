@@ -1,6 +1,6 @@
 import re
 from collections import Counter, defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -12,7 +12,11 @@ from shared.contracts.identifiers import (
     TRANSACTION_ID_PATTERN,
 )
 from transaction_database.enums import PaymentMethod, PaymentStatus
-from transaction_database.seed.sample_data_generator import SampleDataGenerator, SampleDataset
+from transaction_database.seed.sample_data_generator import (
+    SampleDataGenerator,
+    SampleDataProfile,
+    SampleDataset,
+)
 
 BUSINESS_TIMEZONE = ZoneInfo("America/New_York")
 REFERENCE_TIME = datetime(2026, 10, 27, 15, 0, tzinfo=UTC)
@@ -199,3 +203,56 @@ def test_january_seed_puts_every_transaction_in_the_current_month() -> None:
     assert len(dataset.transactions) == 100
     assert all(row["transaction_date"] >= january_start for row in dataset.transactions)
     assert len(dataset.chargebacks) == 15
+
+
+# --- Daily shape (demo data): a few transactions on every day ---
+
+DAILY_REFERENCE_TIME = datetime(2026, 11, 2, 1, 30, tzinfo=UTC)  # Nov 1, 21:30 in New York
+
+
+def daily_dataset(daily_from: date = date(2026, 10, 1), random_seed: int = 7) -> SampleDataset:
+    profile = SampleDataProfile(daily_from=daily_from, transactions_per_day=(3, 6))
+    return SampleDataGenerator(
+        DAILY_REFERENCE_TIME, BUSINESS_TIMEZONE, random_seed, profile
+    ).generate()
+
+
+def business_day(moment: datetime) -> date:
+    return moment.astimezone(BUSINESS_TIMEZONE).date()
+
+
+def test_daily_shape_puts_three_to_six_transactions_on_every_day() -> None:
+    transactions = daily_dataset().transactions
+    per_day = Counter(business_day(row["transaction_date"]) for row in transactions)
+    expected_days = {date(2026, 10, 1) + timedelta(days=n) for n in range(32)}  # Oct 1 .. Nov 1
+    assert set(per_day) == expected_days
+    assert all(3 <= count <= 6 for count in per_day.values())
+    assert all(row["transaction_date"] <= DAILY_REFERENCE_TIME for row in transactions)
+
+
+def test_daily_shape_keeps_the_dataset_rules() -> None:
+    dataset = daily_dataset()
+    assert len(dataset.payments) == len(dataset.transactions)
+    assert 0.08 <= len(dataset.chargebacks) / len(dataset.transactions) <= 0.12
+    assert len({row["transaction_id"] for row in dataset.chargebacks}) == len(dataset.chargebacks)
+    captured_at = {row["transaction_id"]: row["captured_at"] for row in dataset.payments}
+    for chargeback in dataset.chargebacks:
+        assert captured_at[chargeback["transaction_id"]] <= chargeback["opened_at"]
+        assert chargeback["opened_at"] <= DAILY_REFERENCE_TIME
+    assert dataset.refunds  # about a fifth of the payments
+
+
+def test_daily_shape_never_starts_before_january_first() -> None:
+    first = min(row["transaction_date"] for row in daily_dataset(date(2025, 12, 1)).transactions)
+    assert business_day(first) == date(2026, 1, 1)
+
+
+def test_daily_shape_is_deterministic() -> None:
+    assert daily_dataset() == daily_dataset()
+    assert daily_dataset(random_seed=1) != daily_dataset(random_seed=2)
+
+
+def test_default_shape_is_unchanged_by_the_daily_option() -> None:
+    """The tests and the Docker setup rely on exactly 100 transactions and 15 chargebacks."""
+    dataset = generate_dataset()
+    assert (len(dataset.transactions), len(dataset.chargebacks)) == (100, 15)

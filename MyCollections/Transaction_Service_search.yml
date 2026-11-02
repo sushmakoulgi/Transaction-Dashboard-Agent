@@ -1,0 +1,17 @@
+info:
+  name: Transaction_Service_search
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: https://yhj7eucavfhhcstysswzc3ctou0cbzvn.lambda-url.us-east-1.on.aws/api/v1/transactions/search
+  auth:
+    type: bearer
+    token: 9ivbM9UvEtrp0aRExm-usAwefkZFx-OyessXtDxdK2s
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

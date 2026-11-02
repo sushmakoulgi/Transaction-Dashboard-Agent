@@ -1,14 +1,18 @@
 """Writes the generated sample dataset into the database (replacing every row)."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Engine, insert, text
 
 from shared.config import DatabaseSettings
 from transaction_database.orm_models import Base
-from transaction_database.seed.sample_data_generator import SampleDataGenerator, SampleDataset
+from transaction_database.seed.sample_data_generator import (
+    SampleDataGenerator,
+    SampleDataProfile,
+    SampleDataset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +20,9 @@ logger = logging.getLogger(__name__)
 class SeedSettings(DatabaseSettings):
     business_timezone: str = "America/New_York"
     sample_data_random_seed: int = 20261027
+    # Daily shape (demos): 3-6 transactions on every day from this date. Unset: the default
+    # 100-transaction dataset the tests expect. `make seed-daily FROM=2026-10-01`
+    sample_data_daily_from: date | None = None
 
 
 def replace_sample_data(engine: Engine, dataset: SampleDataset) -> None:
@@ -38,6 +45,7 @@ def seed_sample_data(engine: Engine, settings: SeedSettings) -> SampleDataset:
         reference_time=datetime.now(UTC),
         business_timezone=ZoneInfo(settings.business_timezone),
         random_seed=settings.sample_data_random_seed,
+        profile=SampleDataProfile(daily_from=settings.sample_data_daily_from),
     ).generate()
     replace_sample_data(engine, dataset)
     logger.info(

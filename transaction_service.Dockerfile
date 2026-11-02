@@ -25,13 +25,12 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first, so source changes don't reinstall them. uv needs every workspace
-# member's pyproject.toml to read the lockfile.
+# Dependencies first, so source changes don't reinstall them. Only this service's workspace
+# packages are copied: uv installs from the lockfile what they need, nothing of the others.
 COPY pyproject.toml uv.lock .python-version ./
 COPY packages/shared/pyproject.toml packages/shared/pyproject.toml
 COPY packages/transaction_database/pyproject.toml packages/transaction_database/pyproject.toml
 COPY services/transaction_service/pyproject.toml services/transaction_service/pyproject.toml
-COPY services/agent_service/pyproject.toml services/agent_service/pyproject.toml
 RUN uv sync --frozen --no-dev --package transaction-service --no-install-workspace
 
 COPY packages packages

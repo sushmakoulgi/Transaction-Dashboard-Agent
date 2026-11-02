@@ -1,6 +1,6 @@
 ALEMBIC := uv run alembic -c packages/transaction_database/alembic.ini
 
-.PHONY: install up up-stack up-stack-aurora logs up-phase2 dynamodb-local down reset-db migrate seed aurora-bootstrap run-transaction-service run-agent-service lambda-package push-transaction-service-image rotate-tokens push-secrets ui-install ui-dev ui-test ui-api-types lint format test
+.PHONY: install up up-stack up-stack-aurora logs up-phase2 dynamodb-local down reset-db migrate seed seed-daily aurora-bootstrap run-transaction-service run-agent-service lambda-package push-image rotate-tokens push-secrets ui-install ui-dev ui-test ui-api-types lint format test
 
 install:
 	uv sync
@@ -39,6 +39,12 @@ migrate:
 seed:
 	uv run python -m transaction_database.seed
 
+# Demo data: 3-6 transactions on every day from FROM to today (replaces all rows).
+# The integration tests expect the default `make seed` data.
+seed-daily:
+	@test -n "$(FROM)" || { echo "usage: make seed-daily FROM=2026-10-01"; exit 1; }
+	SAMPLE_DATA_DAILY_FROM=$(FROM) uv run python -m transaction_database.seed
+
 # Once per Aurora cluster (DATABASE_IAM_AUTH=true): database + IAM-only roles. Then `make migrate seed`.
 aurora-bootstrap:
 	uv run python -m transaction_database.aurora_bootstrap
@@ -66,27 +72,32 @@ lambda-package:
 	cd $(LAMBDA_BUILD)/package && zip -qr ../transaction-service.zip .
 	@du -sh $(LAMBDA_BUILD)/package $(LAMBDA_BUILD)/transaction-service.zip
 
-# The Transaction Service container image (Lambda / ECS) to Amazon ECR, under a new tag each
-# time (the repository's tags are immutable). Prints the image URI to deploy.
+# A service's container image to its Amazon ECR repository, under a new tag each time (the
+# repositories' tags are immutable). Prints the image URI to deploy.
+#   make push-image SERVICE=transaction-service   (Lambda)   transaction_service.Dockerfile
+#   make push-image SERVICE=agent-service         (ECS)      agent_service.Dockerfile
+#   make push-image SERVICE=ui                    (ECS)      ui/Dockerfile (context ui/)
 AWS_PROFILE_NAME ?= sushma
 AWS_REGION_NAME ?= us-east-1
 ECR_REGISTRY ?= 219806732458.dkr.ecr.$(AWS_REGION_NAME).amazonaws.com
 ifndef IMAGE_TAG
 IMAGE_TAG := $(shell git rev-parse --short HEAD)-$(shell date +%Y%m%d%H%M%S)
 endif
-TRANSACTION_SERVICE_IMAGE := $(ECR_REGISTRY)/transaction-service:$(IMAGE_TAG)
+SERVICE_IMAGE = $(ECR_REGISTRY)/$(SERVICE):$(IMAGE_TAG)
+SERVICE_BUILD = $(if $(filter ui,$(SERVICE)),-f ui/Dockerfile ui,-f $(subst -,_,$(SERVICE)).Dockerfile .)
 
-push-transaction-service-image:
+push-image:
+	@test "$(SERVICE)" = ui -o \( -n "$(SERVICE)" -a -f "$(subst -,_,$(SERVICE)).Dockerfile" \) || { echo "usage: make push-image SERVICE=transaction-service|agent-service|ui"; exit 1; }
 	aws ecr get-login-password --region $(AWS_REGION_NAME) --profile $(AWS_PROFILE_NAME) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
-	docker build --platform linux/arm64 --provenance=false -f transaction_service.Dockerfile -t $(TRANSACTION_SERVICE_IMAGE) .
-	docker push $(TRANSACTION_SERVICE_IMAGE)
-	@echo "Pushed $(TRANSACTION_SERVICE_IMAGE)"
+	docker build --platform linux/arm64 --provenance=false -t $(SERVICE_IMAGE) $(SERVICE_BUILD)
+	docker push $(SERVICE_IMAGE)
+	@echo "Pushed $(SERVICE_IMAGE)"
 
 # New random service tokens in .env (and the UI's in ui/.env.local); nothing is printed.
 rotate-tokens:
 	uv run python deploy/manage_secrets.py rotate-tokens
 
-# .env values into the agent service's AWS Secrets Manager secret (read via SETTINGS_SECRET_ID).
+# ANTHROPIC_API_KEY from .env into the agent service's AWS Secrets Manager secret (ECS injects it).
 push-secrets:
 	uv run python deploy/manage_secrets.py push --profile $(AWS_PROFILE_NAME) --region $(AWS_REGION_NAME)
 

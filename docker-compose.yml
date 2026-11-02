@@ -84,12 +84,12 @@ services:
   ui:
     build:
       context: ui
-      args:
-        # The browser calls the agent through its published port. The token is compiled into
-        # the page (local, single-user use only).
-        VITE_AGENT_API_URL: http://localhost:${AGENT_SERVICE_HOST_PORT:-8000}
-        VITE_AGENT_API_TOKEN: ${AGENT_API_TOKEN:-}
     image: transaction-dashboard-ui:local
+    environment:
+      # Set into the page when the container starts. The browser calls the agent through its
+      # published port, and gets the token (local, single-user use only).
+      AGENT_API_URL: http://localhost:${AGENT_SERVICE_HOST_PORT:-8000}
+      AGENT_API_TOKEN: ${AGENT_API_TOKEN:-}
     restart: unless-stopped
     ports:
       - "${UI_HOST_PORT:-5173}:80"

@@ -6,9 +6,9 @@
 rotate-tokens: new random AGENT_API_TOKEN and TRANSACTION_SERVICE_API_TOKEN in .env, and the
 UI's matching VITE_AGENT_API_TOKEN in ui/.env.local. Nothing is printed.
 
-push: copies values from .env into the agent service's AWS Secrets Manager secret (a JSON
-object, read through SETTINGS_SECRET_ID). The Transaction Service keeps no secret there: its
-token is an environment variable of its Lambda. Prints names and version ids only.
+push: copies ANTHROPIC_API_KEY from .env into the agent service's AWS Secrets Manager secret (a
+JSON object), which ECS injects into the agent's container as an environment variable. The
+service tokens stay plain environment variables. Prints names and version ids only.
 """
 
 import argparse
@@ -26,11 +26,7 @@ ENV_FILE = ROOT / ".env"
 UI_ENV_FILE = ROOT / "ui" / ".env.local"
 
 SECRETS = {
-    "transaction-dashboard/agent-service": [
-        "ANTHROPIC_API_KEY",
-        "AGENT_API_TOKEN",
-        "TRANSACTION_SERVICE_API_TOKEN",
-    ],
+    "agent_service/llm/key": ["ANTHROPIC_API_KEY"],
 }
 
 
