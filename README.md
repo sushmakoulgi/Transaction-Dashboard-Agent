@@ -50,5 +50,7 @@ profile and uses SSL; the app roles `app_owner` / `app_readonly` sign in with to
 Set `DATABASE_IAM_AUTH=false` and restore the local URLs to go back to Docker Postgres. The
 integration tests follow `.env`, so they run against whichever database it points at.
 
+AWS deployment: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 Design: [docs/HLD.md](docs/HLD.md) (architecture) and [docs/LLD.md](docs/LLD.md) (details
 and task list).
